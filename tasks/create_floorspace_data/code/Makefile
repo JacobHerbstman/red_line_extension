@@ -24,7 +24,5 @@ all: ../output/floorspace_by_pin.csv ../output/floorspace_by_tract.csv
 ../input/chicago_tracts_2010.csv: ../../download_census_tracts/output/chicago_tracts_2010.csv | ../input
 	ln -sf $< $@
 
-../input/chicago_tracts_2010.gpkg: ../../download_census_tracts/output/chicago_tracts_2010.gpkg | ../input
-	ln -sf $< $@
 
 include ../../generic.make
