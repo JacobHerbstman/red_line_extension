@@ -61,10 +61,14 @@ ols_dest <- feols(ln_flow ~ distance_km | dest_tract, data = df_positive)
 message("[4/5] OLS: Two-way FE (main spec)...")
 ols_twoway <- feols(ln_flow ~ distance_km | origin_tract + dest_tract, data = df_positive)
 
-# Spec 5: Log-distance specification
-message("[5/5] OLS: Two-way FE with log(distance)...")
+# Spec 5: Log-distance specification (log-log elasticity)
+message("[5/6] OLS: Two-way FE with log(distance)...")
 ols_logdist <- feols(ln_flow ~ ln_distance | origin_tract + dest_tract,
                      data = df_between)  # Exclude within-tract (distance=0)
+
+# Spec 6: Log-distance without FE (to compare pooled log-log)
+message("[6/6] OLS: No FE with log(distance) (standard gravity)...")
+ols_logdist_nofe <- feols(ln_flow ~ ln_distance, data = df_between)
 
 toc()
 
@@ -75,7 +79,8 @@ ols_models <- list(
   "Origin FE" = ols_origin,
   "Dest FE" = ols_dest,
   "Two-way FE" = ols_twoway,
-  "Two-way FE (log dist)" = ols_logdist
+  "Two-way FE (log dist)" = ols_logdist,
+  "No FE (log dist)" = ols_logdist_nofe
 )
 
 # Extract results into table
@@ -121,12 +126,32 @@ ppml_between <- tryCatch({
 })
 
 # PPML including within-tract flows (with distance = 0)
-message("[2/2] PPML: Two-way FE (all pairs)...")
+message("[2/4] PPML: Two-way FE (all pairs)...")
 ppml_full <- tryCatch({
   fepois(flow ~ distance_km | origin_tract + dest_tract,
          data = df_full, glm.iter = 100)
 }, error = function(e) {
   message(sprintf("PPML full failed: %s", e$message))
+  NULL
+})
+
+# PPML with log-distance (log-log specification, comparable to Monte et al.)
+message("[3/4] PPML: Two-way FE with log(distance)...")
+ppml_logdist <- tryCatch({
+  fepois(flow ~ ln_distance | origin_tract + dest_tract,
+         data = df_full_between[!is.na(ln_distance)], glm.iter = 100)
+}, error = function(e) {
+  message(sprintf("PPML log-dist failed: %s", e$message))
+  NULL
+})
+
+# PPML log-distance without FE (standard gravity for comparison)
+message("[4/4] PPML: No FE with log(distance)...")
+ppml_logdist_nofe <- tryCatch({
+  fepois(flow ~ ln_distance,
+         data = df_full_between[!is.na(ln_distance)], glm.iter = 100)
+}, error = function(e) {
+  message(sprintf("PPML log-dist no FE failed: %s", e$message))
   NULL
 })
 
@@ -145,6 +170,18 @@ if (!is.null(ppml_full)) {
   message(sprintf("\nPPML (all pairs) coefficient on distance: %.5f (SE = %.5f)",
                   coef(ppml_full)[1], se(ppml_full)[1]))
   message(sprintf("  => nu = %.4f", -coef(ppml_full)[1]))
+}
+if (!is.null(ppml_logdist)) {
+  ppml_models[["PPML Two-way FE (log dist)"]] <- ppml_logdist
+  message(sprintf("\nPPML (log-dist, two-way FE) coefficient: %.5f (SE = %.5f)",
+                  coef(ppml_logdist)[1], se(ppml_logdist)[1]))
+  message(sprintf("  => log-log elasticity: %.4f", -coef(ppml_logdist)[1]))
+}
+if (!is.null(ppml_logdist_nofe)) {
+  ppml_models[["PPML No FE (log dist)"]] <- ppml_logdist_nofe
+  message(sprintf("\nPPML (log-dist, no FE) coefficient: %.5f (SE = %.5f)",
+                  coef(ppml_logdist_nofe)[1], se(ppml_logdist_nofe)[1]))
+  message(sprintf("  => log-log elasticity: %.4f", -coef(ppml_logdist_nofe)[1]))
 }
 
 # =============================================================================
@@ -208,11 +245,24 @@ all_models <- c(ols_models, ppml_models, list(
   "OLS low earners" = ols_low_earn
 ))
 
+# Dynamically determine estimator and dep_var based on model names
+n_ols <- length(ols_models)
+n_ppml <- length(ppml_models)
+n_robust <- 5  # ols_no_within, ols_short, ols_quad, ols_high_earn, ols_low_earn
+
+# Build estimator vector
+estimator_vec <- c(rep("OLS", n_ols),
+                   rep("PPML", n_ppml),
+                   rep("OLS", n_robust))
+
+# Build dep_var vector (ln_flow for OLS, flow for PPML)
+dep_var_vec <- c(rep("ln_flow", n_ols),
+                 rep("flow", n_ppml),
+                 "ln_flow", "ln_flow", "ln_flow", "ln_flow_high", "ln_flow_low")
+
 results <- data.table(
   specification = names(all_models),
-  estimator = c("OLS", "OLS", "OLS", "OLS", "OLS",
-                rep("PPML", length(ppml_models)),
-                "OLS", "OLS", "OLS", "OLS", "OLS"),
+  estimator = estimator_vec,
   coef_distance = sapply(all_models, function(m) {
     cc <- coef(m)
     if ("distance_km" %in% names(cc)) cc["distance_km"] else cc[1]
@@ -226,9 +276,7 @@ results <- data.table(
     -(if ("distance_km" %in% names(cc)) cc["distance_km"] else cc[1])
   }),
   n_obs = sapply(all_models, function(m) m$nobs),
-  dep_var = c("ln_flow", "ln_flow", "ln_flow", "ln_flow", "ln_flow",
-              rep("flow", length(ppml_models)),
-              "ln_flow", "ln_flow", "ln_flow", "ln_flow_high", "ln_flow_low")
+  dep_var = dep_var_vec
 )
 
 # Add two-way clustered SE for main spec
