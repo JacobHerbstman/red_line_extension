@@ -12,16 +12,6 @@ Simplified quantitative spatial model with:
 
 Based on: Monte et al. (2018), Ahlfeldt et al. (2015), Allen & Arkolakis (2022)
 
-## Data Year Choice: 2019 (Pre-COVID)
-
-**Why 2019?** COVID-19 dramatically disrupted commuting patterns starting in 2020. To analyze transit infrastructure impacts on a "normal" commuting equilibrium, we use 2019 data throughout:
-
-- **LODES**: 2019 with LODES7 (2010 Census tract geography)
-- **ACS**: 2019 5-year estimates (2015-2019)
-- **Tract boundaries**: 2010 Census (to match LODES7)
-
-This means our analysis captures pre-pandemic commuting patterns where downtown employment was at normal levels.
-
 ## Project Structure
 ```
 spatial_hw1/
@@ -48,11 +38,9 @@ spatial_hw1/
    - 2010 tract boundaries (to match LODES7)
    - Population, income, housing from 2019 ACS 5-year
 
-3. **Cook County Assessor** (from aldermanic privilege project)
+3. **Cook County Assessor** 
    - Land/property values
 
-4. **CTA GTFS** (to be added)
-   - Transit travel times
 
 ## Running the Code
 Each task follows the standard workflow:
@@ -72,7 +60,3 @@ Get one at: https://api.census.gov/data/key_signup.html
 - κ (commuting cost decay): ~0.01
 - (1-α) (housing expenditure share): ~0.3-0.4
 - ν = εκ (semi-elasticity of commuting): ~0.07
-
-## Timeline
-- Week 1: Data acquisition, gravity equation estimation
-- Week 2: Counterfactual analysis, write-up
