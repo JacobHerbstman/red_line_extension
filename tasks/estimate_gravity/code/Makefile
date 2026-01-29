@@ -8,7 +8,7 @@ all: ../output/gravity_estimates.csv ../output/diagnostic_plots.pdf
 	$(R) build_commuting_matrix.R
 
 # Step 2: Estimate gravity equations
-../output/gravity_estimates.csv ../output/diagnostic_plots.pdf: estimate_gravity.R ../output/commuting_matrix.csv ../input/chicago_tracts_2010.csv | ../output
+../output/gravity_estimates.csv ../output/diagnostic_plots.pdf: estimate_gravity.R ../output/commuting_matrix.csv ../input/chicago_tracts_2010.csv ../input/tract_floorspace.csv | ../output
 	$(R) estimate_gravity.R
 
 # Input dependencies (symlinks to upstream outputs)
@@ -19,6 +19,9 @@ all: ../output/gravity_estimates.csv ../output/diagnostic_plots.pdf
 	ln -sf $< $@
 
 ../input/chicago_tracts_2010.csv: ../../download_census_tracts/output/chicago_tracts_2010.csv | ../input
+	ln -sf $< $@
+
+../input/tract_floorspace.csv: ../../map_floorspace_shares/output/tract_floorspace_for_model.csv | ../input
 	ln -sf $< $@
 
 include ../../generic.make

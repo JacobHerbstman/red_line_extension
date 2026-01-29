@@ -19,8 +19,47 @@ commuting <- fread("../output/commuting_matrix.csv",
 chicago_tracts <- fread("../input/chicago_tracts_2010.csv",
                         colClasses = c(GEOID = "character"))
 
+# Load floor space data to filter out problematic tracts
+# (airports, pure commercial areas that break the residential choice model)
+floorspace <- fread("../input/tract_floorspace.csv",
+                    colClasses = c(census_tract_geoid = "character"))
+
 message(sprintf("Commuting matrix: %s rows", format(nrow(commuting), big.mark = ",")))
 message(sprintf("Positive flows: %s", format(sum(commuting$flow > 0), big.mark = ",")))
+
+# =============================================================================
+# 1b. FILTER OUT PROBLEMATIC TRACTS
+# =============================================================================
+
+# Same filtering as invert_model.jl for consistency:
+# - Exclude tracts with zero residential floor space (airports, pure commercial)
+# - Exclude tracts with < 100,000 sqft residential (mostly commercial)
+MIN_RESIDENTIAL_SQFT <- 100000
+
+excluded_tracts <- floorspace[is.na(total_sqft_residential) |
+                               total_sqft_residential < MIN_RESIDENTIAL_SQFT,
+                              census_tract_geoid]
+
+message(sprintf("\nExcluding %d tracts with < %s sqft residential floor space:",
+                length(excluded_tracts), format(MIN_RESIDENTIAL_SQFT, big.mark = ",")))
+for (tract in excluded_tracts) {
+  sqft <- floorspace[census_tract_geoid == tract, total_sqft_residential]
+  message(sprintf("  - %s (%s sqft)", tract,
+                  ifelse(is.na(sqft) | sqft == 0, "0", format(sqft, big.mark = ","))))
+}
+
+# Filter commuting matrix to exclude these tracts as BOTH origins and destinations
+n_before <- nrow(commuting)
+commuting <- commuting[!(origin_tract %in% excluded_tracts) &
+                       !(dest_tract %in% excluded_tracts)]
+n_after <- nrow(commuting)
+
+message(sprintf("\nFiltered commuting matrix: %s -> %s rows (%.1f%% reduction)",
+                format(n_before, big.mark = ","),
+                format(n_after, big.mark = ","),
+                100 * (1 - n_after/n_before)))
+message(sprintf("Positive flows after filtering: %s",
+                format(sum(commuting$flow > 0), big.mark = ",")))
 
 # Convert tract IDs to factors for fixest
 commuting[, origin_tract := as.factor(origin_tract)]
