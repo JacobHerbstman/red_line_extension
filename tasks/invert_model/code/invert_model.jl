@@ -46,7 +46,7 @@ const ε = 6.83  # Fréchet shape parameter
 const κ = ν / ε  # ≈ 0.016
 
 # Housing expenditure share (from literature)
-const α_housing = 0.30  # (1-α) in the model notation
+const α_housing = 0.30  # Housing share = (1-α) in model notation where α is goods share
 
 # Convergence parameters
 const TOL = 1e-8
@@ -389,7 +389,7 @@ function recover_amenities(L_R::Vector{Float64}, Q::Vector{Float64},
     λ_R = L_R ./ L_bar  # Residential shares
     
     # Q_n^{-(1-α)ε}
-    Q_term = Q .^ (-(1 - α_housing) * ε)
+    Q_term = Q .^ (-α_housing * ε)
     
     # B_n ∝ λ_n^R / (Q_term * W_n)
     # Handle zeros
@@ -430,7 +430,7 @@ function compute_welfare(B::Vector{Float64}, Q::Vector{Float64},
     """
     println("\nComputing welfare...")
     
-    Q_term = Q .^ (-(1 - α_housing) * ε)
+    Q_term = Q .^ (-α_housing * ε)
     w_ε = w .^ ε
     
     # Φ = Σ_n Σ_i B_n * κ_{ni}^{-ε} * Q_n^{-(1-α)ε} * w_i^ε
@@ -467,7 +467,7 @@ function verify_equilibrium(w::Vector{Float64}, Q::Vector{Float64}, B::Vector{Fl
     # Compute model-implied quantities
     w_ε = w .^ ε
     W = κ_neg_ε * w_ε
-    Q_term = Q .^ (-(1 - α_housing) * ε)
+    Q_term = Q .^ (-α_housing * ε)
     
     # Compute Φ
     Φ = sum(B[n] * κ_neg_ε[n, i] * Q_term[n] * w_ε[i] for n in 1:N, i in 1:N)

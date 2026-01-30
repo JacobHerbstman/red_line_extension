@@ -10,8 +10,10 @@ DIAGNOSTIC_OUTPUTS := ../output/diagnostic_maps.pdf ../output/diagnostic_fit.pdf
                       ../output/diagnostic_distributions.pdf ../output/diagnostic_relationships.pdf \
                       ../output/diagnostic_land_market.pdf ../output/diagnostic_income_validation.pdf \
                       ../output/diagnostic_summary.txt
+RLE_OUTPUTS := ../output/rle_stations.csv ../output/rle_affected_tracts.csv \
+               ../output/rle_stations_map.pdf ../output/rle_stations_map_zoom.pdf
 
-all: $(MODEL_OUTPUTS) $(DIAGNOSTIC_OUTPUTS)
+all: $(MODEL_OUTPUTS) $(DIAGNOSTIC_OUTPUTS) $(RLE_OUTPUTS)
 
 # Model inversion (Julia)
 $(MODEL_OUTPUTS): invert_model.jl ../input/commuting_matrix.csv ../input/lodes_rac.csv ../input/lodes_wac.csv ../input/tract_floorspace.csv | ../output
@@ -20,6 +22,10 @@ $(MODEL_OUTPUTS): invert_model.jl ../input/commuting_matrix.csv ../input/lodes_r
 # Diagnostics (R) - depends on model outputs
 $(DIAGNOSTIC_OUTPUTS): diagnostics.R $(MODEL_OUTPUTS) ../input/chicago_tracts.gpkg | ../output
 	$(R) diagnostics.R
+
+# RLE station identification (R)
+$(RLE_OUTPUTS): identify_rle_stations.R ../input/chicago_tracts.gpkg | ../output
+	$(R) identify_rle_stations.R
 
 # Symlinks to inputs from other tasks
 ../input/commuting_matrix.csv: ../../estimate_gravity/output/commuting_matrix.csv | ../input
@@ -51,4 +57,7 @@ model: $(MODEL_OUTPUTS)
 # Just run diagnostics (assumes model already run)
 diagnostics: $(DIAGNOSTIC_OUTPUTS)
 
-.PHONY: all clean model diagnostics
+# Just identify RLE stations
+rle: $(RLE_OUTPUTS)
+
+.PHONY: all clean model diagnostics rle
