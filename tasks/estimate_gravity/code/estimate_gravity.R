@@ -16,9 +16,6 @@ message("=============================================================")
 commuting <- fread("../output/commuting_matrix.csv",
                    colClasses = c(origin_tract = "character", dest_tract = "character"))
 
-chicago_tracts <- fread("../input/chicago_tracts_2010.csv",
-                        colClasses = c(GEOID = "character"))
-
 # Load floor space data to filter out problematic tracts
 # (airports, pure commercial areas that break the residential choice model)
 floorspace <- fread("../input/tract_floorspace.csv",
@@ -42,10 +39,14 @@ excluded_tracts <- floorspace[is.na(total_sqft_residential) |
 
 message(sprintf("\nExcluding %d tracts with < %s sqft residential floor space:",
                 length(excluded_tracts), format(MIN_RESIDENTIAL_SQFT, big.mark = ",")))
-for (tract in excluded_tracts) {
+show_tracts <- head(excluded_tracts, 10)
+for (tract in show_tracts) {
   sqft <- floorspace[census_tract_geoid == tract, total_sqft_residential]
   message(sprintf("  - %s (%s sqft)", tract,
                   ifelse(is.na(sqft) | sqft == 0, "0", format(sqft, big.mark = ","))))
+}
+if (length(excluded_tracts) > length(show_tracts)) {
+  message(sprintf("  ... and %d more", length(excluded_tracts) - length(show_tracts)))
 }
 
 # Filter commuting matrix to exclude these tracts as BOTH origins and destinations

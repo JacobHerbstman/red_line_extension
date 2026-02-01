@@ -1,8 +1,6 @@
 # --- Package bootstrap script for Spatial Economics HW1 ---
 # Red Line Extension Welfare Analysis
 
-rm(list = ls())
-
 # CRAN Packages needed for this project
 cran_packages <- c(
   # Data manipulation
@@ -52,9 +50,14 @@ options(repos = c(CRAN = "https://cloud.r-project.org"))
 
 # --- Step 3: install & load CRAN packages ---
 output <- character()
+load_pkg <- function(pkg) {
+  suppressPackageStartupMessages(
+    require(pkg, character.only = TRUE, quietly = TRUE)
+  )
+}
 
 for (pkg in cran_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+  if (!load_pkg(pkg)) {
     message(sprintf("Installing %s ...", pkg))
     
     # Try binary first
@@ -75,7 +78,7 @@ for (pkg in cran_packages) {
       })
     }
     
-    if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+    if (!load_pkg(pkg)) {
       warning(sprintf("Package %s could not be installed or loaded.", pkg))
     }
   }
@@ -86,7 +89,7 @@ for (pkg in cran_packages) {
 
 # --- Step 4: Try optional packages (don't fail if unavailable) ---
 for (pkg in optional_packages) {
-  if (require(pkg, character.only = TRUE, quietly = TRUE)) {
+  if (load_pkg(pkg)) {
     version <- tryCatch({ packageDescription(pkg, fields = "Version") }, error = function(e) NA)
     output <- c(output, paste(pkg, version, "[optional]", sep = " : "))
   } else {
@@ -107,11 +110,17 @@ if (census_key == "") {
 }
 
 # --- Step 7: Write output log ---
-output_log <- paste("Packages loaded:", paste(output, collapse = "\n"), sep = "\n")
-cat(output_log, "\n")
+message(sprintf("Loaded %d packages (including optional checks).", length(output)))
 
-# Write to file for Makefile target (resolve path relative to this script, not cwd)
-packages_script_dir <- dirname(sys.frame(1)$ofile %||% ".")
+# Write to file for Makefile target (resolve path relative to this script if possible)
+script_file <- tryCatch(sys.frame(1)$ofile, error = function(e) NULL)
+if (is.null(script_file) || !nzchar(script_file)) {
+  script_file <- tryCatch(commandArgs(trailingOnly = FALSE), error = function(e) character(0))
+  script_file <- script_file[grepl("^--file=", script_file)]
+  script_file <- if (length(script_file) > 0) sub("^--file=", "", script_file[1]) else ""
+}
+
+packages_script_dir <- if (nzchar(script_file)) dirname(script_file) else "."
 packages_output_path <- file.path(packages_script_dir, "../output/R_packages.txt")
 dir.create(dirname(packages_output_path), showWarnings = FALSE, recursive = TRUE)
 writeLines(output, packages_output_path)

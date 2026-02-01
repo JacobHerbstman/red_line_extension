@@ -1,15 +1,4 @@
-# create_redline_extension_gtfs.R
-# Create a modified CTA GTFS with Red Line Extension stations
-#
-# Adds 4 new stations extending Red Line south from 95th/Dan Ryan:
-# - 103rd Street
-# - 111th Street
-# - Michigan Avenue (116th)
-# - 130th Street
-#
-# Output:
-# - cta_gtfs_with_extension.zip (modified GTFS)
-# - rle_stations.csv (metadata about new stations)
+# Create CTA GTFS with four Red Line Extension stations south of 95th.
 
 source("../../setup_environment/code/packages.R")
 
@@ -31,8 +20,7 @@ new_stations <- tibble(
   station_order = 1:4  # Order from 95th southward
 )
 
-# Travel times between stations (in seconds)
-# Based on typical CTA elevated train speeds (~2-3 min between stations)
+# Travel times between stations in seconds.
 inter_station_times <- c(
   180,  # 95th -> 103rd: 3 minutes
   180,  # 103rd -> 111th: 3 minutes
@@ -40,7 +28,6 @@ inter_station_times <- c(
   240   # Michigan -> 130th: 4 minutes (longer distance)
 )
 
-# Cumulative times from 95th/Dan Ryan
 cumulative_times <- cumsum(inter_station_times)
 new_stations$time_from_95th <- cumulative_times
 
@@ -88,10 +75,6 @@ red_line_trips <- gtfs$trips %>%
   filter(route_id == red_line_route_id)
 
 message(sprintf("Red Line trips: %d", nrow(red_line_trips)))
-
-# Find 95th/Dan Ryan stop (current southern terminus)
-# CTA uses parent_station for main station (40450) and child stops for platforms (30088, 30089)
-# Strategy: Find all stops used by Red Line trips, then identify the southern terminus
 
 # First, get all stops used by Red Line trips
 red_line_trip_ids <- red_line_trips$trip_id
@@ -247,8 +230,16 @@ subtract_seconds_from_gtfs_time <- function(time_str, seconds_to_sub) {
   sprintf("%02d:%02d:%02d", new_hours, new_mins, new_secs)
 }
 
-# ---- EXTEND SOUTHBOUND TRIPS ----
-# Add stop_times for new stations after 95th
+gtfs_time_to_seconds <- function(time_vec) {
+  parts <- str_split_fixed(as.character(time_vec), ":", 3)
+  suppressWarnings(
+    as.numeric(parts[, 1]) * 3600 +
+      as.numeric(parts[, 2]) * 60 +
+      as.numeric(parts[, 3])
+  )
+}
+
+# Add stop_times for new stations after 95th (southbound).
 
 new_stop_times_south <- list()
 
@@ -285,9 +276,7 @@ new_stop_times_southbound <- bind_rows(new_stop_times_south)
 message(sprintf("Created %d new stop_times for southbound trips",
                 nrow(new_stop_times_southbound)))
 
-# ---- EXTEND NORTHBOUND TRIPS ----
-# Add stop_times for new stations before 95th (with negative offsets)
-# Also need to shift all existing stop_sequences by +4
+# Add stop_times for new stations before 95th (northbound).
 
 # First, shift existing stop_sequences for northbound trips
 if (nrow(northbound_trips) > 0) {
@@ -303,9 +292,6 @@ if (nrow(northbound_trips) > 0) {
 
 new_stop_times_north <- list()
 
-# Total time from 130th to 95th
-total_extension_time <- max(new_stations$time_from_95th)
-
 if (nrow(northbound_trips) > 0) {
   for (i in 1:nrow(northbound_trips)) {
     trip <- northbound_trips[i, ]
@@ -314,11 +300,7 @@ if (nrow(northbound_trips) > 0) {
     for (j in nrow(new_stations):1) {
       station <- new_stations[j, ]
 
-      # Time before 95th = total_time - time_from_95th for this station
-      time_before_95th <- total_extension_time - station$time_from_95th + inter_station_times[1]
-
-      arrival <- subtract_seconds_from_gtfs_time(trip$arrival_time,
-                                                  total_extension_time - station$time_from_95th + cumulative_times[1])
+      arrival <- subtract_seconds_from_gtfs_time(trip$arrival_time, station$time_from_95th)
       departure <- add_seconds_to_gtfs_time(arrival, DWELL_TIME)
 
       # Stop sequence: 130th=1, Michigan=2, 111th=3, 103rd=4
@@ -371,6 +353,20 @@ gtfs$stop_times <- bind_rows(gtfs$stop_times, all_new_stop_times)
 
 message(sprintf("Total stop_times added: %d", nrow(all_new_stop_times)))
 message(sprintf("New total stop_times: %s", format(nrow(gtfs$stop_times), big.mark = ",")))
+
+# Sanity check: stop_times must be weakly increasing within each modified trip
+modified_trip_ids <- unique(c(southbound_trips$trip_id, northbound_trips$trip_id))
+violations <- gtfs$stop_times %>%
+  filter(trip_id %in% modified_trip_ids) %>%
+  mutate(arrival_seconds = gtfs_time_to_seconds(arrival_time)) %>%
+  arrange(trip_id, stop_sequence) %>%
+  group_by(trip_id) %>%
+  summarize(has_decrease = any(diff(arrival_seconds) < 0, na.rm = TRUE), .groups = "drop") %>%
+  filter(has_decrease)
+
+if (nrow(violations) > 0) {
+  stop(sprintf("ERROR: %d modified trips have decreasing stop_times", nrow(violations)))
+}
 
 # =============================================================================
 # 5. SAVE MODIFIED GTFS AND METADATA

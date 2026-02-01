@@ -1,21 +1,10 @@
-# compute_travel_times.R
-# Compute tract-to-tract multimodal travel time matrices using r5r
-#
-# Computes travel times for two scenarios:
-# 1. Baseline: Current CTA network
-# 2. Extension: CTA network with Red Line Extension
-#
-# Output:
-# - travel_time_matrix_baseline.csv
-# - travel_time_matrix_extension.csv
-# - travel_time_change.csv
+# Compute tract-level transit travel-time matrices with r5r for:
+# (i) baseline CTA GTFS and (ii) GTFS with Red Line Extension.
 
 # =============================================================================
 # CRITICAL: Set Java parameters BEFORE loading any packages
 # =============================================================================
 
-# r5r requires Java 11+ with sufficient heap memory
-# This MUST be set before loading r5r or any rJava-dependent packages
 options(java.parameters = "-Xmx8G")
 
 # Now load packages
@@ -75,6 +64,13 @@ n_pairs <- n_tracts^2
 message(sprintf("Loaded %d tract centroids", n_tracts))
 message(sprintf("Will compute %s OD pairs", format(n_pairs, big.mark = ",")))
 
+# Ensure r5r rebuilds the network graph from current GTFS/OSM inputs.
+# This avoids silently reusing stale network.dat when inputs change.
+reset_r5_network_cache <- function(network_dir) {
+  cache_files <- file.path(network_dir, c("network.dat", "network_settings.json"))
+  unlink(cache_files[file.exists(cache_files)])
+}
+
 # =============================================================================
 # 2. COMPUTE BASELINE TRAVEL TIMES
 # =============================================================================
@@ -93,12 +89,12 @@ file.copy("../input/chicago.osm.pbf",
 file.copy("../input/cta_gtfs.zip",
           file.path(baseline_dir, "cta_gtfs.zip"),
           overwrite = TRUE)
+reset_r5_network_cache(baseline_dir)
 
-message("Building baseline network graph (this may take a few minutes on first run)...")
+message("Building baseline network graph...")
 tic("Baseline network build")
 
-# Use build_network (new API in r5r 2.3+)
-r5r_baseline <- build_network(data_path = baseline_dir, verbose = TRUE)
+r5r_baseline <- build_network(data_path = baseline_dir, verbose = FALSE)
 
 toc()
 
@@ -106,7 +102,7 @@ message("Computing baseline travel time matrix...")
 tic("Baseline travel time matrix")
 
 ttm_baseline <- travel_time_matrix(
-  r5r_network = r5r_baseline,  # Updated parameter name for r5r 2.3+
+  r5r_network = r5r_baseline,
   origins = points,
   destinations = points,
   mode = MODE,
@@ -115,14 +111,13 @@ ttm_baseline <- travel_time_matrix(
   max_trip_duration = MAX_TRIP_DURATION,
   time_window = TIME_WINDOW,
   percentiles = PERCENTILES,
-  verbose = TRUE
+  verbose = FALSE
 )
 
 toc()
 
 # Clean up to free memory
 r5r::stop_r5(r5r_baseline)
-rm(r5r_baseline)
 rJava::.jgc(R.gc = TRUE)
 gc()
 
@@ -145,12 +140,12 @@ file.copy("../input/chicago.osm.pbf",
 file.copy("../input/cta_gtfs_with_extension.zip",
           file.path(extension_dir, "cta_gtfs.zip"),  # r5r expects gtfs.zip name
           overwrite = TRUE)
+reset_r5_network_cache(extension_dir)
 
 message("Building extension network graph...")
 tic("Extension network build")
 
-# Use build_network (new API in r5r 2.3+)
-r5r_extension <- build_network(data_path = extension_dir, verbose = TRUE)
+r5r_extension <- build_network(data_path = extension_dir, verbose = FALSE)
 
 toc()
 
@@ -158,7 +153,7 @@ message("Computing extension travel time matrix...")
 tic("Extension travel time matrix")
 
 ttm_extension <- travel_time_matrix(
-  r5r_network = r5r_extension,  # Updated parameter name for r5r 2.3+
+  r5r_network = r5r_extension,
   origins = points,
   destinations = points,
   mode = MODE,
@@ -167,14 +162,13 @@ ttm_extension <- travel_time_matrix(
   max_trip_duration = MAX_TRIP_DURATION,
   time_window = TIME_WINDOW,
   percentiles = PERCENTILES,
-  verbose = TRUE
+  verbose = FALSE
 )
 
 toc()
 
 # Clean up
 r5r::stop_r5(r5r_extension)
-rm(r5r_extension)
 rJava::.jgc(R.gc = TRUE)
 gc()
 

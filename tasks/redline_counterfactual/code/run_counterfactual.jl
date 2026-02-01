@@ -1,27 +1,8 @@
-#=
-Red Line Extension Counterfactual
-==================================
-Solves for the new spatial equilibrium after the RLE reduces commuting costs
-for tracts near new stations.
-
-Usage: julia run_counterfactual.jl <catchment_radius_m> <kappa_reduction_pct>
-Example: julia run_counterfactual.jl 800 20
-
-Inputs:
-- model_fundamentals.csv (from inversion)
-- model_parameters.csv (from inversion)
-- travel_time_change.csv (baseline vs extension)
-- chicago_tracts.gpkg (for tract centroids)
-
-Outputs:
-- counterfactual_r{radius}_k{reduction}.csv (tract-level changes)
-- welfare_r{radius}_k{reduction}.csv (aggregate welfare)
-=#
+# Red Line Extension counterfactual with exact hat algebra and endogenous wages.
 
 using CSV
 using DataFrames
 using Statistics
-using LinearAlgebra
 using Printf
 
 #=============================================================================
@@ -44,11 +25,10 @@ println("  Catchment radius: $(CATCHMENT_RADIUS) m")
 println("  κ reduction: $(Int(KAPPA_REDUCTION * 100))%")
 println("  Note: κ reduction scales GTFS-implied travel-time changes")
 
-# Model parameters - MUST MATCH invert_model.jl!
-# Defaults below are overridden if model_parameters.csv provides values.
+# Defaults are overridden by model_parameters.csv when available.
 ν = 0.039
 ε = 6.83
-const α_housing = 0.30  # Housing expenditure share (1-α) in model notation
+const α_housing = 0.30
 GAMMA_LABOR = 0.65  # Labor share of production
 
 const TOL = 1e-6
@@ -303,31 +283,12 @@ println("  Improved OD pairs (ΔT < 0): $(n_treated_pairs)")
 
 println("\nSolving counterfactual equilibrium...")
 
-# We use the exact hat algebra approach
-# 
-# The key equations in changes (hat = new/old):
-#
-# 1. Commuting market access:
-#    W_n' = Σ_i κ_ni^(-ε) * w_i^ε * κ_hat_ni^(-ε) * w_hat_i^ε
-#
-# 2. Labor market clearing:
-#    L_i^M * L_hat_i^M = Σ_n λ_ni|n * L_n^R * λ_hat_ni|n * L_hat_n^R
-#
-# 3. Land market clearing:
-#    Q_hat_n = v_bar_hat_n * L_hat_n^R
-#
-# 4. Population:
-#    Σ_n L_n^R * L_hat_n^R = L_bar (unchanged)
-#
-# Now solving with ENDOGENOUS wages for full general equilibrium.
-
 # Initialize
 w_hat = ones(N)
 Q_hat = ones(N)
 L_R_hat = ones(N)
 L_M_hat = ones(N)
 
-# Baseline expected income from baseline conditional shares
 v_bar_baseline = lambda_cond * w
 
 println("  Iterating...")
@@ -401,13 +362,7 @@ end
 
 println("\nComputing welfare change...")
 
-# Welfare: U_bar ∝ Φ^(1/ε)
-# Φ = Σ_n Σ_i B_n * κ_ni^(-ε) * Q_n^(-(1-α)ε) * w_i^ε
-#
-# Φ'/Φ = Σ_n Σ_i [share_ni] * κ_hat_ni^(-ε) * Q_hat_n^(-(1-α)ε) * w_hat_i^ε
-
-# Compute baseline Φ (for verification against loaded value)
-# Note: (1-α) = α_housing = housing expenditure share
+# Compute baseline Φ for a consistency check against inversion output.
 Q_term_baseline = Q .^ (-α_housing * ε)
 Φ_check = sum(B .* Q_term_baseline .* W_access)
 
