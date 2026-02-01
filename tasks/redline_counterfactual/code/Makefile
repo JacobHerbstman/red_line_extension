@@ -12,14 +12,14 @@ JULIA = julia
 # SPECIFICATION GRID
 # ============================================================================
 # Catchment radii (meters): 400, 800 (main), 1200
-# Kappa reductions (%): 10, 20 (main), 30
+# GTFS shock scaling: full shock only (100%)
 
 CATCHMENT_RADII := 800
-KAPPA_REDUCTIONS := 20
+KAPPA_REDUCTIONS := 100
 
 # Main specification
 MAIN_CATCHMENT := 800
-MAIN_REDUCTION := 20
+MAIN_REDUCTION := 100
 
 # ============================================================================
 # GENERATE OUTPUT FILENAMES
@@ -94,7 +94,7 @@ $(foreach reduction,$(KAPPA_REDUCTIONS), \
 
 $(SUMMARY_OUTPUTS): summarize_counterfactuals.R $(COUNTERFACTUAL_OUTPUTS) $(WELFARE_OUTPUTS) \
                     ../input/chicago_tracts.gpkg | ../output
-	$(R) summarize_counterfactuals.R
+	$(R) summarize_counterfactuals.R $(WELFARE_OUTPUTS)
 
 # ============================================================================
 # INPUT SYMLINKS

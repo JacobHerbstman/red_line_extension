@@ -14,16 +14,19 @@ if length(ARGS) < 2
     error("Usage: julia run_counterfactual.jl <catchment_radius_m> <kappa_reduction_pct>")
 end
 
-const CATCHMENT_RADIUS = parse(Int, ARGS[1])  # meters (retained for filename compatibility)
-const KAPPA_REDUCTION = parse(Float64, ARGS[2]) / 100  # scales GTFS-implied time changes
+const CATCHMENT_RADIUS = parse(Int, ARGS[1])  # retained for filename compatibility
+const SHOCK_LABEL_PCT = Int(round(parse(Float64, ARGS[2])))
+if SHOCK_LABEL_PCT != 100
+    error("This specification now applies the full GTFS shock. Pass kappa_reduction_pct = 100.")
+end
+const KAPPA_REDUCTION = 1.0
 
 println("="^70)
 println("RED LINE EXTENSION COUNTERFACTUAL")
 println("="^70)
 println("\nSpecification:")
 println("  Catchment radius: $(CATCHMENT_RADIUS) m")
-println("  κ reduction: $(Int(KAPPA_REDUCTION * 100))%")
-println("  Note: κ reduction scales GTFS-implied travel-time changes")
+println("  GTFS shock scaling: $(Int(KAPPA_REDUCTION * 100))% (full shock)")
 
 # Defaults are overridden by model_parameters.csv when available.
 ν = 0.039
@@ -243,7 +246,7 @@ finite_base = T_baseline[isfinite.(T_baseline)]
 finite_ext = T_extension[isfinite.(T_extension)]
 println("  Mean baseline travel time (finite): $(mean(finite_base)) minutes")
 println("  Mean extension travel time (finite): $(mean(finite_ext)) minutes")
-println("  Mean change (scaled): $(mean(ΔT_effective)) minutes")
+println("  Mean change: $(mean(ΔT_effective)) minutes")
 
 #=============================================================================
                     COMPUTE TREATMENT INTENSITY (FROM GTFS TIME CHANGES)
@@ -439,14 +442,14 @@ results_df = DataFrame(
     dist_to_rle_station = tract_station_dist
 )
 
-output_file = joinpath(output_dir, "counterfactual_r$(CATCHMENT_RADIUS)_k$(Int(KAPPA_REDUCTION*100)).csv")
+output_file = joinpath(output_dir, "counterfactual_r$(CATCHMENT_RADIUS)_k$(SHOCK_LABEL_PCT).csv")
 CSV.write(output_file, results_df)
 println("  Saved: $(output_file)")
 
 # Welfare summary
 welfare_df = DataFrame(
     catchment_radius_m = CATCHMENT_RADIUS,
-    kappa_reduction_pct = KAPPA_REDUCTION * 100,
+    kappa_reduction_pct = SHOCK_LABEL_PCT,
     n_treated_tracts = length(treated_tracts),
     n_treated_pairs = n_treated_pairs,
     Phi_baseline = Φ_check,
@@ -461,7 +464,7 @@ welfare_df = DataFrame(
     mean_w_hat_all = mean(w_hat)
 )
 
-welfare_file = joinpath(output_dir, "welfare_r$(CATCHMENT_RADIUS)_k$(Int(KAPPA_REDUCTION*100)).csv")
+welfare_file = joinpath(output_dir, "welfare_r$(CATCHMENT_RADIUS)_k$(SHOCK_LABEL_PCT).csv")
 CSV.write(welfare_file, welfare_df)
 println("  Saved: $(welfare_file)")
 

@@ -230,6 +230,38 @@ message(sprintf("  - OD pairs with reduced travel time: %s (%.1f%%)",
                 format(improved, big.mark = ","),
                 100 * improved / total_valid))
 
+# Origin-level shock diagnostics for writeup tables
+tract_change_summary <- travel_time_change %>%
+  group_by(from_id) %>%
+  summarize(
+    n_valid_pairs = sum(!is.na(travel_time_change)),
+    mean_baseline_min = mean(travel_time_baseline, na.rm = TRUE),
+    mean_extension_min = mean(travel_time_extension, na.rm = TRUE),
+    mean_change_min = mean(travel_time_change, na.rm = TRUE),
+    median_change_min = median(travel_time_change, na.rm = TRUE),
+    p10_change_min = as.numeric(quantile(travel_time_change, 0.10, na.rm = TRUE)),
+    p90_change_min = as.numeric(quantile(travel_time_change, 0.90, na.rm = TRUE)),
+    pct_pairs_improved = 100 * mean(travel_time_change < 0, na.rm = TRUE),
+    pct_pairs_worsened = 100 * mean(travel_time_change > 0, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rename(origin_tract = from_id) %>%
+  arrange(mean_change_min)
+
+top_n <- 20
+top_tract_changes <- bind_rows(
+  tract_change_summary %>%
+    filter(mean_change_min < 0) %>%
+    slice_head(n = top_n) %>%
+    mutate(rank_group = "most_improved", rank_within_group = row_number()),
+  tract_change_summary %>%
+    filter(mean_change_min > 0) %>%
+    arrange(desc(mean_change_min)) %>%
+    slice_head(n = top_n) %>%
+    mutate(rank_group = "most_worsened", rank_within_group = row_number())
+) %>%
+  select(rank_group, rank_within_group, everything())
+
 # Largest improvements
 top_improvements <- travel_time_change %>%
   filter(!is.na(travel_time_change)) %>%
@@ -283,6 +315,12 @@ message("Saved: ../output/travel_time_matrix_extension.csv")
 
 write_csv(travel_time_change_out, "../output/travel_time_change.csv")
 message("Saved: ../output/travel_time_change.csv")
+
+write_csv(tract_change_summary, "../output/tract_commute_change_summary.csv")
+message("Saved: ../output/tract_commute_change_summary.csv")
+
+write_csv(top_tract_changes, "../output/top_tract_commute_changes.csv")
+message("Saved: ../output/top_tract_commute_changes.csv")
 
 # Save summary statistics
 summary_stats <- tibble(

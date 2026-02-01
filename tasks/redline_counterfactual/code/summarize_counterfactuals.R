@@ -14,27 +14,41 @@ library(knitr)
 
 cat("Loading data...\n")
 
-# Specification grid
-catchment_radii <- c(800)
-kappa_reductions <- c(20)
+args <- commandArgs(trailingOnly = TRUE)
 
-# Load all welfare results
-welfare_results <- map_dfr(catchment_radii, function(r) {
-  map_dfr(kappa_reductions, function(k) {
-    file <- sprintf("../output/welfare_r%d_k%d.csv", r, k)
-    if (file.exists(file)) {
-      read_csv(file, show_col_types = FALSE)
-    } else {
-      NULL
-    }
-  })
-})
+# Load welfare files passed from Makefile when available.
+# Fallback to scanning output/ for interactive runs.
+if (length(args) > 0) {
+  welfare_files <- args
+} else {
+  welfare_files <- list.files(
+    path = "../output",
+    pattern = "^welfare_r[0-9]+_k[0-9]+\\.csv$",
+    full.names = TRUE
+  )
+}
+
+if (length(welfare_files) == 0) {
+  stop("No welfare output files found in ../output")
+}
+
+welfare_results <- map_dfr(welfare_files, ~ read_csv(.x, show_col_types = FALSE))
 
 cat("Loaded", nrow(welfare_results), "specifications\n")
 
-# Load main specification counterfactual (800m, 20%)
-main_spec <- read_csv("../output/counterfactual_r800_k20.csv", show_col_types = FALSE) %>%
-  mutate(tract = as.character(tract))  # Convert to character for joining
+# Main specification for maps/tables:
+# prefer r=800, k=100 when available; otherwise use the first available spec.
+main_welfare <- welfare_results %>%
+  filter(catchment_radius_m == 800, kappa_reduction_pct == 100)
+if (nrow(main_welfare) == 0) {
+  main_welfare <- welfare_results %>% slice(1)
+}
+
+main_radius <- main_welfare$catchment_radius_m[[1]]
+main_kappa <- main_welfare$kappa_reduction_pct[[1]]
+main_counterfactual_file <- sprintf("../output/counterfactual_r%d_k%d.csv", main_radius, main_kappa)
+main_spec <- read_csv(main_counterfactual_file, show_col_types = FALSE) %>%
+  mutate(tract = as.character(tract))
 
 # Load tract geometries
 tracts_sf <- st_read("../input/chicago_tracts.gpkg", quiet = TRUE) %>%
@@ -89,11 +103,8 @@ cat("\nSaved: welfare_summary.csv\n")
 # ----------------------------------------------------------------------------
 
 cat("\n", strrep("=", 70), "\n")
-cat("MAIN SPECIFICATION (800m, 20% reduction)\n")
+cat(sprintf("MAIN SPECIFICATION (%dm, %.0f%% GTFS shock)\n", main_radius, main_kappa))
 cat(strrep("=", 70), "\n\n")
-
-main_welfare <- welfare_results %>%
-  filter(catchment_radius_m == 800, kappa_reduction_pct == 20)
 
 cat(sprintf("Treated tracts: %d\n", main_welfare$n_treated_tracts))
 cat(sprintf("Welfare change: %.4f%%\n", main_welfare$welfare_change_pct))
@@ -136,7 +147,7 @@ cat("\nSaved: counterfactual_main_spec.csv\n")
 robustness_table <- welfare_results %>%
   mutate(
     spec_label = sprintf("r=%dm, Δτ×%d%%", catchment_radius_m, kappa_reduction_pct),
-    main_spec = (catchment_radius_m == 800 & kappa_reduction_pct == 20)
+    main_spec = (catchment_radius_m == main_radius & kappa_reduction_pct == main_kappa)
   ) %>%
   select(
     spec_label,
@@ -197,7 +208,7 @@ p_price <- ggplot() +
              color = "black", size = 2, shape = 17) +
   labs(
     title = "Floor Price Changes from Red Line Extension",
-    subtitle = "Main specification: 800m catchment, 20% kappa reduction"
+    subtitle = sprintf("Main specification: %dm catchment, %.0f%% GTFS shock", main_radius, main_kappa)
   ) +
   map_theme
 
@@ -218,15 +229,14 @@ p_pop <- ggplot() +
              color = "black", size = 2, shape = 17) +
   labs(
     title = "Residential Population Changes from Red Line Extension",
-    subtitle = "Main specification: 800m catchment, 20% kappa reduction"
+    subtitle = sprintf("Main specification: %dm catchment, %.0f%% GTFS shock", main_radius, main_kappa)
   ) +
   map_theme
 
 ggsave("../output/map_population_change.pdf", p_pop, width = 8, height = 10)
 cat("  Saved: map_population_change.pdf\n")
 
-# 3. Treatment intensity map (showing continuous spatial decay)
-# This shows the Gaussian decay of treatment intensity from stations
+# 3. Treatment intensity map
 p_intensity <- ggplot() +
   geom_sf(data = main_spec_sf, aes(fill = intensity), color = "gray70", linewidth = 0.05) +
   scale_fill_viridis_c(
@@ -264,7 +274,7 @@ p_zoom <- ggplot() +
   coord_sf(xlim = c(-87.70, -87.55), ylim = c(41.63, 41.75)) +
   labs(
     title = "Red Line Extension: Floor Price Changes (Detail)",
-    subtitle = "Main specification: 800m catchment, 20% kappa reduction"
+    subtitle = sprintf("Main specification: %dm catchment, %.0f%% GTFS shock", main_radius, main_kappa)
   ) +
   map_theme
 
@@ -358,22 +368,29 @@ cat("  Saved: counterfactual_maps.pdf\n")
 
 cat("\nCreating robustness plot...\n")
 
-# Plot welfare change across specifications
-p_robust <- welfare_results %>%
+robust_plot_data <- welfare_results %>%
   mutate(
     catchment_label = factor(sprintf("%dm", catchment_radius_m)),
     reduction_label = factor(sprintf("%d%%", kappa_reduction_pct)),
-    main_spec = (catchment_radius_m == 800 & kappa_reduction_pct == 20)
-  ) %>%
-  ggplot(aes(x = reduction_label, y = welfare_change_pct, 
-             color = catchment_label, group = catchment_label)) +
-  geom_line(size = 1) +
+    main_spec = (catchment_radius_m == main_radius & kappa_reduction_pct == main_kappa)
+  )
+
+p_robust <- ggplot(
+  robust_plot_data,
+  aes(x = reduction_label, y = welfare_change_pct, color = catchment_label, group = catchment_label)
+)
+
+if (nrow(robust_plot_data) > 1) {
+  p_robust <- p_robust + geom_line(linewidth = 1)
+}
+
+p_robust <- p_robust +
   geom_point(aes(shape = main_spec), size = 3) +
   scale_shape_manual(values = c("FALSE" = 16, "TRUE" = 18), guide = "none") +
   scale_color_brewer(palette = "Set1", name = "Catchment\nRadius") +
   labs(
     title = "Welfare Effects Across Specifications",
-    subtitle = "Diamond indicates main specification (800m, 20% GTFS scale)",
+    subtitle = sprintf("Diamond indicates main specification (%dm, %.0f%% GTFS shock)", main_radius, main_kappa),
     x = "GTFS Time-Change Scale",
     y = "Welfare Change (%)"
   ) +
@@ -404,7 +421,7 @@ cat(sprintf("  Max:  %.4f%% (r=%dm, k=%d%%)\n",
             max(welfare_results$welfare_change_pct),
             welfare_results$catchment_radius_m[which.max(welfare_results$welfare_change_pct)],
             welfare_results$kappa_reduction_pct[which.max(welfare_results$welfare_change_pct)]))
-cat(sprintf("  Main: %.4f%% (r=800m, k=20%%)\n", 
-            main_welfare$welfare_change_pct))
+cat(sprintf("  Main: %.4f%% (r=%dm, k=%d%%)\n", 
+            main_welfare$welfare_change_pct, main_radius, main_kappa))
 
 cat("\nDone!\n")
