@@ -365,6 +365,15 @@ end
 
 println("\nComputing welfare change...")
 
+# Resident-level welfare hat by origin tract:
+# V̂_n = Q̂_n^{-α} * (Ŵ_n)^{1/ε}, where
+# Ŵ_n = Σ_i λ_{ni} κ̂_{ni}^{-ε} ŵ_i^{ε}
+adj_final = κ_hat_neg_ε .* (w_hat .^ ε)'
+W_hat_resident = vec(sum(lambda_cond .* adj_final, dims = 2))
+W_hat_resident = max.(W_hat_resident, 1e-12)
+resident_welfare_hat = (Q_hat .^ (-α_housing)) .* (W_hat_resident .^ (1.0 / ε))
+resident_welfare_pct_change = (resident_welfare_hat .- 1.0) .* 100.0
+
 # Compute baseline Φ for a consistency check against inversion output.
 Q_term_baseline = Q .^ (-α_housing * ε)
 Φ_check = sum(B .* Q_term_baseline .* W_access)
@@ -421,6 +430,8 @@ println("\nSaving results...")
 results_df = DataFrame(
     tract = tracts,
     intensity = intensity,
+    resident_welfare_hat = resident_welfare_hat,
+    resident_welfare_pct_change = resident_welfare_pct_change,
     wage_baseline = w,
     w_hat = w_hat,
     wage_new = w .* w_hat,

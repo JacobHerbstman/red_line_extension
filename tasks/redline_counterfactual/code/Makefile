@@ -50,6 +50,7 @@ WELFARE_OUTPUTS := $(call GEN_WELFARE_FILES)
 SUMMARY_OUTPUTS := ../output/welfare_summary.csv \
                    ../output/counterfactual_main_spec.csv \
                    ../output/map_welfare_by_tract.pdf \
+                   ../output/map_treatment_intensity.pdf \
                    ../output/map_population_change.pdf \
                    ../output/map_price_change.pdf \
                    ../output/robustness_table.csv

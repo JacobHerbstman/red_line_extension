@@ -236,14 +236,13 @@ p_pop <- ggplot() +
 ggsave("../output/map_population_change.pdf", p_pop, width = 8, height = 10)
 cat("  Saved: map_population_change.pdf\n")
 
-# 3. Treatment intensity map
-p_intensity <- ggplot() +
-  geom_sf(data = main_spec_sf, aes(fill = intensity), color = "gray70", linewidth = 0.05) +
-  scale_fill_viridis_c(
-    option = "plasma",
-    name = "Treatment\nIntensity",
-    trans = "sqrt",  # Square root transform to show gradient better
-    limits = c(0, 1),
+# 3. Welfare change map (resident expected utility, by tract of residence)
+p_welfare <- ggplot() +
+  geom_sf(data = main_spec_sf, aes(fill = resident_welfare_pct_change), color = "gray70", linewidth = 0.05) +
+  scale_fill_gradient2(
+    low = "blue", mid = "white", high = "red", midpoint = 0,
+    name = "Welfare\n% Change",
+    na.value = "gray90",
     oob = scales::squish
   ) +
   geom_point(data = rle_stations, aes(x = lon, y = lat), 
@@ -251,14 +250,34 @@ p_intensity <- ggplot() +
   geom_text(data = rle_stations, aes(x = lon, y = lat, label = station),
             nudge_x = 0.015, size = 2.5, hjust = 0, color = "white") +
   labs(
-    title = "Treatment Intensity (GTFS Time Improvements)",
-    subtitle = sprintf("Intensity from mean travel-time improvement; %d tracts with intensity > 10%%", 
-                       sum(main_spec$intensity > 0.1, na.rm = TRUE))
+    title = "Welfare Change by Tract of Residence",
+    subtitle = "Resident expected utility change under the counterfactual"
   ) +
   map_theme
 
-ggsave("../output/map_welfare_by_tract.pdf", p_intensity, width = 8, height = 10)
+ggsave("../output/map_welfare_by_tract.pdf", p_welfare, width = 8, height = 10)
 cat("  Saved: map_welfare_by_tract.pdf\n")
+
+# 3b. Treatment intensity map (GTFS travel-time improvements)
+p_intensity <- ggplot() +
+  geom_sf(data = main_spec_sf, aes(fill = intensity), color = "gray70", linewidth = 0.05) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "Treatment\nIntensity",
+    trans = "sqrt",
+    limits = c(0, 1),
+    oob = scales::squish
+  ) +
+  geom_point(data = rle_stations, aes(x = lon, y = lat), 
+             color = "white", size = 3, shape = 17) +
+  labs(
+    title = "Treatment Intensity from GTFS Time Improvements",
+    subtitle = sprintf("%d tracts with intensity > 10%%", sum(main_spec$intensity > 0.1, na.rm = TRUE))
+  ) +
+  map_theme
+
+ggsave("../output/map_treatment_intensity.pdf", p_intensity, width = 8, height = 10)
+cat("  Saved: map_treatment_intensity.pdf\n")
 
 # 4. Zoomed map of RLE area
 p_zoom <- ggplot() +
@@ -336,25 +355,23 @@ p_popgrid <- ggplot() +
   labs(title = "Population Changes") +
   grid_map_theme
 
-# Treatment intensity map
-p_intensity_grid <- ggplot() +
-  geom_sf(data = main_spec_sf, aes(fill = intensity), color = NA) +
+# Resident welfare map
+p_welfare_grid <- ggplot() +
+  geom_sf(data = main_spec_sf, aes(fill = resident_welfare_pct_change), color = NA) +
   scale_fill_viridis_c(
     option = "plasma",
-    name = "Intensity",
-    trans = "sqrt",
-    limits = c(0, 1),
+    name = "Welfare % Change",
     oob = scales::squish
   ) +
   geom_point(data = rle_stations, aes(x = lon, y = lat), 
              color = "white", size = 1.5, shape = 17) +
-  labs(title = "Treatment Intensity") +
+  labs(title = "Welfare Changes") +
   grid_map_theme
 
 # Combine into 2x2 grid
 p_combined <- grid.arrange(
   p_wages, p_prices,
-  p_popgrid, p_intensity_grid,
+  p_popgrid, p_welfare_grid,
   nrow = 2, ncol = 2,
   top = "Red Line Extension Counterfactual Effects"
 )
