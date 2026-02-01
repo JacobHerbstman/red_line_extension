@@ -1,3 +1,6 @@
+# Declare default target first (before includes)
+.DEFAULT_GOAL := all
+
 SHELL := bash
 include ../../shell_functions.make
 include ../../generic.make
@@ -11,8 +14,8 @@ JULIA = julia
 # Catchment radii (meters): 400, 800 (main), 1200
 # Kappa reductions (%): 10, 20 (main), 30
 
-CATCHMENT_RADII := 400 800 1200
-KAPPA_REDUCTIONS := 10 20 30
+CATCHMENT_RADII := 800
+KAPPA_REDUCTIONS := 20
 
 # Main specification
 MAIN_CATCHMENT := 800

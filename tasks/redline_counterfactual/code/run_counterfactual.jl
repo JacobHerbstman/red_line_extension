@@ -172,11 +172,9 @@ end
 n_missing_centroids = length(missing_centroid_tracts)
 if n_missing_centroids > 0
     println("  Warning: $(n_missing_centroids) tracts missing centroids:")
-    for t in missing_centroid_tracts[1:min(5, n_missing_centroids)]
+    println("  GEOIDs of missing tracts:")
+    for t in missing_centroid_tracts
         println("    - $t")
-    end
-    if n_missing_centroids > 5
-        println("    ... and $(n_missing_centroids - 5) more")
     end
     println("  WARNING: These tracts won't be identified as treated!")
 end
@@ -236,8 +234,7 @@ end
 println("  Tracts within $(CATCHMENT_RADIUS)m of RLE station: $(length(treated_tracts))")
 
 if length(treated_tracts) == 0
-    println("  WARNING: No treated tracts found! Check coordinates.")
-    # Print some diagnostics
+    println("  ERROR: No treated tracts found!")
     println("  Sample tract coordinates:")
     for n in 1:min(5, N)
         println("    Tract $(tracts[n]): ($(tract_lats[n]), $(tract_lons[n]))")
@@ -246,6 +243,7 @@ if length(treated_tracts) == 0
     for (name, lat, lon) in RLE_STATIONS
         println("    $name: ($lat, $lon)")
     end
+    error("No treated tracts found. Results would be meaningless. Check tract centroids and station coordinates.")
 end
 
 #=============================================================================
@@ -273,9 +271,14 @@ println("  Downtown tracts: $(length(downtown_tracts))")
 
 println("\nComputing commuting cost changes...")
 
-# κ_hat[n,i] = κ'[n,i] / κ[n,i]
+# κ_hat[n,i] = κ'[n,i] / κ[n,i] = ratio of new to old iceberg cost
 # = 1 for non-treated pairs
-# = (1 - KAPPA_REDUCTION) for treated origin n to downtown destination i
+# For treated pairs, we reduce the effective friction parameter, not the final cost.
+# Baseline: κ = exp(κ_param * d)
+# Counterfactual: κ' = exp(κ_param * d * (1 - reduction))
+# Ratio: κ_hat = κ'/κ = exp(κ_param * d * (1 - reduction) - κ_param * d)
+#              = exp(-κ_param * d * reduction)
+# This ensures κ_hat < 1 (cost reduction) without violating κ >= 1.
 
 κ_hat = ones(N, N)
 
@@ -283,12 +286,18 @@ println("\nComputing commuting cost changes...")
 n_treated_pairs = length(treated_tracts) * length(downtown_tracts)
 for n in treated_tracts
     for i in downtown_tracts
-        κ_hat[n, i] = 1.0 - KAPPA_REDUCTION
+        # Reduce the effective friction parameter by KAPPA_REDUCTION percent
+        # New cost = exp(κ_param * dist * (1 - reduction))
+        # Ratio (κ_hat) = exp(-κ_param * dist * reduction)
+        κ_hat[n, i] = exp(-κ_param * D[n, i] * KAPPA_REDUCTION)
     end
 end
 
 println("  Treated (origin, destination) pairs: $(n_treated_pairs)")
-println("  κ_hat for treated pairs: $(1.0 - KAPPA_REDUCTION)")
+if n_treated_pairs > 0
+    treated_kappa_hats = [κ_hat[n, i] for n in treated_tracts for i in downtown_tracts]
+    println("  κ_hat for treated pairs: mean=$(round(mean(treated_kappa_hats), digits=4)), min=$(round(minimum(treated_kappa_hats), digits=4)), max=$(round(maximum(treated_kappa_hats), digits=4))")
+end
 
 #=============================================================================
                     COMPUTE BASELINE κ^(-ε) MATRIX

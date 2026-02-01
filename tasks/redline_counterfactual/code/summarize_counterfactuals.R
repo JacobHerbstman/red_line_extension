@@ -39,9 +39,22 @@ main_spec <- read_csv("../output/counterfactual_r800_k20.csv", show_col_types = 
 # Load tract geometries
 tracts_sf <- st_read("../input/chicago_tracts.gpkg", quiet = TRUE)
 
+# Debug: Check join compatibility
+cat("\nJoin diagnostics:\n")
+cat("  Tracts in shapefile:", nrow(tracts_sf), "\n")
+cat("  Tracts in counterfactual:", nrow(main_spec), "\n")
+cat("  Sample GEOID from shapefile:", head(tracts_sf$GEOID, 3), "\n")
+cat("  Sample tract from counterfactual:", head(main_spec$tract, 3), "\n")
+
 # Merge with main spec results
 main_spec_sf <- tracts_sf %>%
   left_join(main_spec, by = c("GEOID" = "tract"))
+
+# Check join success
+matched <- sum(!is.na(main_spec_sf$Q_pct_change))
+unmatched <- sum(is.na(main_spec_sf$Q_pct_change))
+cat("  Matched tracts:", matched, "\n")
+cat("  Unmatched tracts (will show as gray):", unmatched, "\n")
 
 # ----------------------------------------------------------------------------
 # Print Welfare Summary Table
@@ -169,19 +182,21 @@ rle_stations <- tibble(
 )
 
 # 1. Floor price change map
+# Let ggplot2 determine color scale limits dynamically from data
+# Use na.value to handle unmatched tracts
 p_price <- ggplot() +
-  geom_sf(data = main_spec_sf, aes(fill = Q_pct_change), color = NA) +
+  geom_sf(data = main_spec_sf, aes(fill = Q_pct_change), color = "gray80", linewidth = 0.05) +
   scale_fill_gradient2(
     low = "blue", mid = "white", high = "red", midpoint = 0,
     name = "% Change",
-    limits = c(-5, 20),
-    oob = squish
+    na.value = "gray90",
+    oob = scales::squish
   ) +
   geom_point(data = rle_stations, aes(x = lon, y = lat), 
              color = "black", size = 2, shape = 17) +
   labs(
     title = "Floor Price Changes from Red Line Extension",
-    subtitle = "Main specification: 800m catchment, 20% κ reduction"
+    subtitle = "Main specification: 800m catchment, 20% kappa reduction"
   ) +
   map_theme
 
@@ -189,19 +204,20 @@ ggsave("../output/map_price_change.pdf", p_price, width = 8, height = 10)
 cat("  Saved: map_price_change.pdf\n")
 
 # 2. Population change map
+# Let ggplot2 determine color scale limits dynamically from data
 p_pop <- ggplot() +
-  geom_sf(data = main_spec_sf, aes(fill = L_R_pct_change), color = NA) +
+  geom_sf(data = main_spec_sf, aes(fill = L_R_pct_change), color = "gray80", linewidth = 0.05) +
   scale_fill_gradient2(
     low = "blue", mid = "white", high = "red", midpoint = 0,
     name = "% Change",
-    limits = c(-2, 10),
-    oob = squish
+    na.value = "gray90",
+    oob = scales::squish
   ) +
   geom_point(data = rle_stations, aes(x = lon, y = lat), 
              color = "black", size = 2, shape = 17) +
   labs(
     title = "Residential Population Changes from Red Line Extension",
-    subtitle = "Main specification: 800m catchment, 20% κ reduction"
+    subtitle = "Main specification: 800m catchment, 20% kappa reduction"
   ) +
   map_theme
 

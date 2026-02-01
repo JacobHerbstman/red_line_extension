@@ -30,7 +30,11 @@ cran_packages <- c(
  # Utilities
   "here",
   "glue",
-  "tictoc"
+  "tictoc",
+
+  # Travel time computation (r5r dependencies)
+  "osmextract",   # For downloading OSM data
+  "tidytransit"   # For GTFS manipulation
 )
 
 # Optional packages (may require additional setup)

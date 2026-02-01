@@ -13,5 +13,7 @@ RColorBrewer : 1.1-3
 here : 1.0.1
 glue : 1.8.0
 tictoc : 1.2.1
-r5r : NOT INSTALLED [optional]
+osmextract : 0.5.3
+tidytransit : 1.8.0
+r5r : 2.3.0 : [optional]
 CENSUS_API_KEY : 29d8cfa2 ...[set]
