@@ -1,0 +1,59 @@
+# #################################################
+# ## Gitignore for Spatial Economics HW1
+# #################################################
+
+# --- System & Editor Files ---
+.DS_Store
+.Rhistory
+__pycache__/
+
+# --- Log files ---
+*.log
+
+# --- Task input/output/temp folders ---
+# Ignore the contents of ALL input, output, and temp folders
+tasks/*/input/
+tasks/*/output/
+tasks/*/temp/
+
+# --- Secrets ---
+# Ignore file containing API keys and other secrets
+.Renviron
+
+# --- R graphics ---
+**/code/Rplots.pdf
+
+# --- Large data files ---
+*.csv
+*.gpkg
+*.parquet
+*.rds
+
+# Exception: track setup_environment output for verification
+!tasks/setup_environment/output/
+!tasks/setup_environment/output/R_packages.txt
+
+# --- Local project docs / drafts not needed for pipeline execution ---
+AGENTS.md
+CLAUDE.md
+tasks/invert_model/README.md
+tasks/redline_counterfactual/README.md
+tasks/_deprecated/
+
+# --- Local reference PDFs ---
+Adding_Commuting_to_Regional_and_Urban_Models.pdf
+Berlin-Ecta-10876.pdf
+CMLEE.pdf
+Quantitative_Spatial_Economics.pdf
+Two_Quantitative_Models_for_Regions.pdf
+ps1.pdf
+
+# --- LaTeX build artifacts ---
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.out
+paper/*.synctex.gz
+paper/*.pdf
