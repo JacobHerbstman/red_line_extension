@@ -10,7 +10,7 @@ Example: julia run_counterfactual.jl 800 20
 Inputs:
 - model_fundamentals.csv (from inversion)
 - model_parameters.csv (from inversion)
-- commuting_matrix.csv (distances)
+- travel_time_change.csv (baseline vs extension)
 - chicago_tracts.gpkg (for tract centroids)
 
 Outputs:
@@ -33,8 +33,8 @@ if length(ARGS) < 2
     error("Usage: julia run_counterfactual.jl <catchment_radius_m> <kappa_reduction_pct>")
 end
 
-const CATCHMENT_RADIUS = parse(Int, ARGS[1])  # meters
-const KAPPA_REDUCTION = parse(Float64, ARGS[2]) / 100  # convert to decimal
+const CATCHMENT_RADIUS = parse(Int, ARGS[1])  # meters (retained for filename compatibility)
+const KAPPA_REDUCTION = parse(Float64, ARGS[2]) / 100  # scales GTFS-implied time changes
 
 println("="^70)
 println("RED LINE EXTENSION COUNTERFACTUAL")
@@ -42,18 +42,19 @@ println("="^70)
 println("\nSpecification:")
 println("  Catchment radius: $(CATCHMENT_RADIUS) m")
 println("  κ reduction: $(Int(KAPPA_REDUCTION * 100))%")
+println("  Note: κ reduction scales GTFS-implied travel-time changes")
 
 # Model parameters - MUST MATCH invert_model.jl!
-# From PPML travel-time gravity: ν_time = 0.039/min → ν_dist = 0.078/km
-const ν = 0.078
-const ε = 6.83
-const κ_param = ν / ε  # ≈ 0.0114
+# Defaults below are overridden if model_parameters.csv provides values.
+ν = 0.039
+ε = 6.83
 const α_housing = 0.30  # Housing expenditure share (1-α) in model notation
-const GAMMA_LABOR = 0.65  # Labor share of production (for wage adjustment)
+GAMMA_LABOR = 0.65  # Labor share of production
 
-# Convergence
-const TOL = 1e-6  # Relaxed for faster convergence
+const TOL = 1e-6
 const MAX_ITER = 500
+const DAMP = 0.5
+const L_M_FLOOR = 1.0
 
 # RLE Station coordinates (lat, lon)
 const RLE_STATIONS = [
@@ -63,17 +64,7 @@ const RLE_STATIONS = [
     ("130th Street", 41.6534, -87.6046)
 ]
 
-# Existing Red Line stations - these are the destinations that become more accessible
-# Key downtown stations
-const DOWNTOWN_STATIONS = [
-    ("Roosevelt", 41.8674, -87.6266),
-    ("Harrison", 41.8740, -87.6277),
-    ("Jackson", 41.8781, -87.6277),
-    ("Monroe", 41.8808, -87.6277),
-    ("Lake", 41.8857, -87.6277),
-    ("Grand", 41.8916, -87.6281),
-    ("Chicago", 41.8967, -87.6285)
-]
+const MIN_TRAVEL_TIME = 5.0       # minutes for within-tract minimum
 
 #=============================================================================
                             HELPER FUNCTIONS
@@ -106,12 +97,21 @@ function find_nearest_station(lat, lon, stations)
     return nearest, min_dist
 end
 
-function is_downtown_tract(lat, lon)
-    """Check if tract centroid is near downtown (within 3km of Loop)."""
-    loop_lat, loop_lon = 41.8781, -87.6298  # Jackson/State
-    d = haversine_distance(lat, lon, loop_lat, loop_lon)
-    return d < 3000  # 3km
+function parse_tt(x)
+    if x === missing
+        return missing
+    elseif x isa AbstractString
+        s = strip(x)
+        if s == "" || uppercase(s) == "NA"
+            return missing
+        end
+        v = tryparse(Float64, s)
+        return v === nothing ? missing : v
+    else
+        return Float64(x)
+    end
 end
+
 
 #=============================================================================
                             LOAD DATA
@@ -138,15 +138,44 @@ centroids = Dict(string(row.census_tract_geoid) => (row.centroid_lat, row.centro
 
 # Load parameters
 params_df = CSV.read(joinpath(input_dir, "model_parameters.csv"), DataFrame)
+
+# Override parameters from inversion if available
+nu_row = params_df[params_df.parameter .== "nu_time_per_min", :value]
+eps_row = params_df[params_df.parameter .== "epsilon", :value]
+gamma_row = params_df[params_df.parameter .== "gamma_labor", :value]
+if length(nu_row) > 0
+    ν = nu_row[1]
+end
+if length(eps_row) > 0
+    ε = eps_row[1]
+end
+if length(gamma_row) > 0
+    GAMMA_LABOR = gamma_row[1]
+end
+
 Φ_baseline_loaded = params_df[params_df.parameter .== "Phi", :value][1]
 println("  Baseline Φ (from inversion): $(Φ_baseline_loaded)")
+println("  Using ν = $(round(ν, digits=5)) per minute, ε = $(round(ε, digits=4)), γ = $(round(GAMMA_LABOR, digits=3))")
 
-# Load commuting matrix
-commuting = CSV.read(joinpath(input_dir, "commuting_matrix.csv"), DataFrame)
+# Load travel time change matrix (baseline vs extension)
+tt_change = CSV.read(joinpath(input_dir, "travel_time_change.csv"), DataFrame)
 
 # Create tract index mapping (convert to strings for consistent matching)
 tracts = string.(fundamentals.tract)
 tract_to_idx = Dict(t => i for (i, t) in enumerate(tracts))
+
+# Load baseline conditional commuting shares (exact hat algebra)
+lambda_df = CSV.read(joinpath(input_dir, "commuting_shares_model.csv"), DataFrame)
+lambda_cond = zeros(N, N)
+for row in eachrow(lambda_df)
+    origin_str = string(row.origin_tract)
+    dest_str = string(row.dest_tract)
+    if haskey(tract_to_idx, origin_str) && haskey(tract_to_idx, dest_str)
+        n = tract_to_idx[origin_str]
+        i = tract_to_idx[dest_str]
+        lambda_cond[n, i] = row.lambda_cond
+    end
+end
 
 # Extract baseline values
 w = fundamentals.wage
@@ -183,128 +212,90 @@ end
 println("  Loaded centroids for $(N - n_missing_centroids) of $N tracts")
 
 #=============================================================================
-                    BUILD DISTANCE MATRIX
+                    BUILD TRAVEL TIME MATRICES
 =============================================================================#
 
-println("\nBuilding distance matrix...")
+println("\nBuilding travel time matrices...")
 
-# Initialize distance matrix
-D = fill(50.0, N, N)  # Default to 50km for missing pairs
+T_baseline = fill(Inf, N, N)
+T_extension = fill(Inf, N, N)
 
-# Fill from commuting data (convert tract IDs to strings for matching)
-for row in eachrow(commuting)
+for row in eachrow(tt_change)
     origin_str = string(row.origin_tract)
     dest_str = string(row.dest_tract)
     if haskey(tract_to_idx, origin_str) && haskey(tract_to_idx, dest_str)
         n = tract_to_idx[origin_str]
         i = tract_to_idx[dest_str]
-        D[n, i] = max(row.distance_km, 0.5)  # Minimum 0.5km
+
+        base = parse_tt(row.travel_time_baseline)
+        ext = parse_tt(row.travel_time_extension)
+
+        if ismissing(base) && !ismissing(ext)
+            base = ext
+        end
+        if ismissing(ext) && !ismissing(base)
+            ext = base
+        end
+
+        if !ismissing(base) && !ismissing(ext)
+            T_baseline[n, i] = max(base, MIN_TRAVEL_TIME)
+            T_extension[n, i] = max(ext, MIN_TRAVEL_TIME)
+        end
     end
 end
 
-# Set diagonal (within-tract) to small value
+# Ensure within-tract times are at least MIN_TRAVEL_TIME
 for n in 1:N
-    D[n, n] = 0.5
+    T_baseline[n, n] = max(T_baseline[n, n], MIN_TRAVEL_TIME)
+    T_extension[n, n] = max(T_extension[n, n], MIN_TRAVEL_TIME)
 end
 
-println("  Mean distance: $(mean(D)) km")
+# Impute missing travel times using a high percentile of observed baseline times
+finite_base = T_baseline[isfinite.(T_baseline)]
+impute_tt = quantile(finite_base, 0.99)
+T_baseline[.!isfinite.(T_baseline)] .= impute_tt
+T_extension[.!isfinite.(T_extension)] .= impute_tt
+
+ΔT = T_extension .- T_baseline
+ΔT_effective = ΔT .* KAPPA_REDUCTION
+
+finite_base = T_baseline[isfinite.(T_baseline)]
+finite_ext = T_extension[isfinite.(T_extension)]
+println("  Mean baseline travel time (finite): $(mean(finite_base)) minutes")
+println("  Mean extension travel time (finite): $(mean(finite_ext)) minutes")
+println("  Mean change (scaled): $(mean(ΔT_effective)) minutes")
 
 #=============================================================================
-                    COMPUTE TREATMENT INTENSITY (Continuous Decay)
+                    COMPUTE TREATMENT INTENSITY (FROM GTFS TIME CHANGES)
 =============================================================================#
 
-println("\nComputing treatment intensity with spatial decay...")
+println("\nComputing treatment intensity from GTFS travel-time changes...")
 
-# For each tract, compute a continuous intensity based on distance to nearest RLE station
-# Using Gaussian decay: intensity = exp(-(distance^2) / (2 * σ^2))
-# where σ = CATCHMENT_RADIUS defines the spatial reach
-
+# Distance to nearest new station (for reporting/maps only)
 tract_station_dist = zeros(N)
-intensity = zeros(N)
-
 for n in 1:N
     lat, lon = tract_lats[n], tract_lons[n]
     _, dist = find_nearest_station(lat, lon, RLE_STATIONS)
     tract_station_dist[n] = dist
-    # Gaussian decay with catchment radius as σ
-    intensity[n] = exp(-(dist^2) / (2 * CATCHMENT_RADIUS^2))
 end
 
-# For reporting, count "treated" as tracts with > 10% intensity
+# Intensity based on mean improvement across destinations (scaled ΔT)
+improve = max.(0.0, -ΔT_effective)
+mean_improve = [mean(improve[n, :]) for n in 1:N]
+max_improve = maximum(mean_improve)
+intensity = max_improve > 0 ? mean_improve ./ max_improve : zeros(N)
+
 treated_tracts = findall(intensity .> 0.1)
 println("  Tracts with intensity > 10%: $(length(treated_tracts))")
 println("  Mean intensity: $(round(mean(intensity), digits=4))")
 println("  Max intensity: $(round(maximum(intensity), digits=4))")
 
-# Error check - make sure we have treatment effect
-if maximum(intensity) < 0.01
-    println("  ERROR: No tracts have meaningful treatment intensity!")
-    println("  Missing centroid tracts:")
-    for t in missing_centroid_tracts
-        println("    - $t")
-    end
-    error("No meaningful treatment intensity. Check tract centroids match RLE station locations.")
-end
+# Summary stats for treated pairs
+n_treated_pairs = sum(ΔT_effective .< 0)
+println("  Improved OD pairs (ΔT < 0): $(n_treated_pairs)")
 
-#=============================================================================
-                    IDENTIFY DESTINATION TRACTS
-=============================================================================#
-
-# Destinations that benefit = tracts near Red Line (especially downtown)
-println("\nIdentifying destination tracts (downtown/Red Line accessible)...")
-
-downtown_tracts = Int[]
-for n in 1:N
-    lat, lon = tract_lats[n], tract_lons[n]
-    if is_downtown_tract(lat, lon)
-        push!(downtown_tracts, n)
-    end
-end
-
-println("  Downtown tracts: $(length(downtown_tracts))")
-
-#=============================================================================
-                    COMPUTE κ CHANGE MATRIX
-=============================================================================#
-
-println("\nComputing commuting cost changes...")
-
-# κ_hat[n,i] = ratio of new to old iceberg cost
-# Using continuous intensity for smooth spatial spillovers:
-# κ_hat[n,i] = exp(-κ_param * D[n,i] * KAPPA_REDUCTION * intensity[n])
-# This ensures:
-#   - κ_hat <= 1 always (cost reduction, not increase)
-#   - Smooth spatial decay of treatment effect
-#   - Larger reductions for closer tracts and longer commutes
-
-κ_hat = ones(N, N)
-
-for n in 1:N
-    if intensity[n] > 1e-6  # Only compute for tracts with meaningful intensity
-        for i in downtown_tracts
-            # Apply weighted reduction based on tract's intensity
-            κ_hat[n, i] = exp(-κ_param * D[n, i] * KAPPA_REDUCTION * intensity[n])
-        end
-    end
-end
-
-# Summary stats
-n_affected_tracts = sum(intensity .> 1e-6)
-n_treated_pairs = n_affected_tracts * length(downtown_tracts)
-affected_kappa_hats = [κ_hat[n, i] for n in 1:N for i in downtown_tracts if intensity[n] > 1e-6]
-println("  Tracts with non-zero intensity: $(n_affected_tracts)")
-println("  Affected (origin, destination) pairs: $(n_treated_pairs)")
-if length(affected_kappa_hats) > 0
-    println("  κ_hat for affected pairs: mean=$(round(mean(affected_kappa_hats), digits=4)), min=$(round(minimum(affected_kappa_hats), digits=4)), max=$(round(maximum(affected_kappa_hats), digits=4))")
-end
-
-#=============================================================================
-                    COMPUTE BASELINE κ^(-ε) MATRIX
-=============================================================================#
-
-# Baseline commuting costs
-κ_baseline = exp.(κ_param .* D)
-κ_neg_ε_baseline = κ_baseline .^ (-ε)
+# κ_hat^{-ε} directly from ΔT (minutes)
+κ_hat_neg_ε = exp.(-ν .* ΔT_effective)
 
 #=============================================================================
                     SOLVE COUNTERFACTUAL EQUILIBRIUM
@@ -331,102 +322,68 @@ println("\nSolving counterfactual equilibrium...")
 # Now solving with ENDOGENOUS wages for full general equilibrium.
 
 # Initialize
-w_hat = ones(N)  # Now endogenous - will be updated in iteration
+w_hat = ones(N)
 Q_hat = ones(N)
 L_R_hat = ones(N)
 L_M_hat = ones(N)
 
-# Precompute baseline objects
-w_ε = w .^ ε
-W_baseline = κ_neg_ε_baseline * w_ε
+# Baseline expected income from baseline conditional shares
+v_bar_baseline = lambda_cond * w
 
-# Baseline conditional commuting probabilities λ_ni|n
-λ_cond = zeros(N, N)
-for n in 1:N
-    for i in 1:N
-        λ_cond[n, i] = κ_neg_ε_baseline[n, i] * w_ε[i] / W_baseline[n]
-    end
-end
-
-# Baseline expected income
-v_bar_baseline = zeros(N)
-for n in 1:N
-    v_bar_baseline[n] = sum(λ_cond[n, i] * w[i] for i in 1:N)
-end
-
-# Iterate to find new equilibrium
 println("  Iterating...")
 
+θ = α_housing * ε
+s_R = L_R ./ sum(L_R)
+
 for iter in 1:MAX_ITER
-    # Step 1: Compute new commuting market access W_hat
-    # W_n' = Σ_i κ_ni^(-ε) * κ_hat_ni^(-ε) * w_i^ε * w_hat_i^ε
-    W_new = zeros(N)
-    for n in 1:N
-        for i in 1:N
-            W_new[n] += κ_neg_ε_baseline[n, i] * (κ_hat[n, i]^(-ε)) * w_ε[i] * (w_hat[i]^ε)
-        end
-    end
-    W_hat = W_new ./ W_baseline
-    
-    # Step 2: Compute new conditional commuting probabilities
-    λ_cond_new = zeros(N, N)
-    for n in 1:N
-        for i in 1:N
-            λ_cond_new[n, i] = κ_neg_ε_baseline[n, i] * (κ_hat[n, i]^(-ε)) * w_ε[i] * (w_hat[i]^ε) / W_new[n]
-        end
-    end
-    
-    # Step 3: Compute new expected income
-    v_bar_new = zeros(N)
-    for n in 1:N
-        v_bar_new[n] = sum(λ_cond_new[n, i] * w[i] * w_hat[i] for i in 1:N)
-    end
-    v_bar_hat = v_bar_new ./ v_bar_baseline
-    
-    # Step 4: Residential choice - compute new residential probabilities
-    # λ_n^R ∝ B_n * Q_n^(-(1-α)ε) * W_n where (1-α) = α_housing = housing share
-    # λ_n^R_hat ∝ Q_hat_n^(-(1-α)ε) * W_hat_n (B unchanged)
+    global w_hat, Q_hat, L_R_hat, L_M_hat
+    w_hat_prev = copy(w_hat)
+    L_R_hat_prev = copy(L_R_hat)
+    Q_hat_prev = copy(Q_hat)
 
-    λ_R_hat_unnorm = (Q_hat .^ (-α_housing*ε)) .* W_hat
-    λ_R_hat_sum = sum((L_R ./ sum(L_R)) .* λ_R_hat_unnorm)
-    
-    # New residential population (preserving total)
-    L_R_hat_new = λ_R_hat_unnorm ./ λ_R_hat_sum
-    
-    # Step 5: Land market clearing - update prices
-    # Q_hat = v_bar_hat * L_R_hat (since H_R is fixed)
-    Q_hat_new = v_bar_hat .* L_R_hat_new
-    
-    # Step 6: Labor market clearing - compute new workplace employment
-    L_M_new = zeros(N)
-    for i in 1:N
-        for n in 1:N
-            L_M_new[i] += λ_cond_new[n, i] * L_R[n] * L_R_hat_new[n]
-        end
-    end
-    L_M_hat_new = L_M_new ./ max.(L_M, 1.0)
+    adj = κ_hat_neg_ε .* (w_hat .^ ε)'
+    lambda_weighted = lambda_cond .* adj
+    W_hat = vec(sum(lambda_weighted, dims = 2))
+    W_hat = max.(W_hat, 1e-12)
+    lambda_cond_new = lambda_weighted ./ W_hat
 
-    # Step 7: WAGE ADJUSTMENT via labor demand curve
-    # Using diminishing returns to labor: w = A * L^(γ-1) where γ = GAMMA_LABOR
-    # So w_hat = L_hat^(γ-1)
-    # This is simpler and converges faster than the full GE approach
+    L_M_new = lambda_cond_new' * (L_R .* L_R_hat)
+    L_M_hat_new = L_M_new ./ max.(L_M, L_M_FLOOR)
+    L_M_hat_new = max.(L_M_hat_new, 1e-8)
     w_hat_new = L_M_hat_new .^ (GAMMA_LABOR - 1.0)
-    w_hat_new = w_hat_new ./ mean(w_hat_new)  # Normalize mean wage = 1
+    w_hat = (1.0 - DAMP) .* w_hat .+ DAMP .* w_hat_new
 
-    # Check convergence (now including wages)
-    diff_Q = maximum(abs.(Q_hat_new .- Q_hat))
-    diff_L = maximum(abs.(L_R_hat_new .- L_R_hat))
-    diff_w = maximum(abs.(w_hat_new .- w_hat))
+    adj = κ_hat_neg_ε .* (w_hat .^ ε)'
+    lambda_weighted = lambda_cond .* adj
+    W_hat = vec(sum(lambda_weighted, dims = 2))
+    W_hat = max.(W_hat, 1e-12)
+    lambda_cond_new = lambda_weighted ./ W_hat
+
+    v_bar_new = lambda_cond_new * (w .* w_hat)
+    v_bar_hat = v_bar_new ./ v_bar_baseline
+
+    x_lr = (v_bar_hat .^ (-θ)) .* W_hat
+    x_lr = max.(x_lr, 1e-12)
+    L_R_hat_new = x_lr .^ (1.0 / (1.0 + θ))
+    scale_lr = 1.0 / sum(s_R .* L_R_hat_new)
+    L_R_hat_new .= L_R_hat_new .* scale_lr
+    L_R_hat = (1.0 - DAMP) .* L_R_hat .+ DAMP .* L_R_hat_new
+    L_R_hat .= L_R_hat .* (1.0 / sum(s_R .* L_R_hat))
+
+    Q_hat = v_bar_hat .* L_R_hat
+    Q_hat = max.(Q_hat, 1e-8)
+
+    L_M_new = lambda_cond_new' * (L_R .* L_R_hat)
+    L_M_hat = L_M_new ./ max.(L_M, L_M_FLOOR)
+    L_M_hat = max.(L_M_hat, 1e-8)
+
+    diff_Q = maximum(abs.(Q_hat .- Q_hat_prev))
+    diff_L = maximum(abs.(L_R_hat .- L_R_hat_prev))
+    diff_w = maximum(abs.(w_hat .- w_hat_prev))
 
     if iter % 100 == 0 || iter == 1
         @printf("  Iter %4d: ΔQ=%.2e, ΔL=%.2e, Δw=%.2e\n", iter, diff_Q, diff_L, diff_w)
     end
-
-    # Update with damping for stability
-    global Q_hat = 0.5 * Q_hat + 0.5 * Q_hat_new
-    global L_R_hat = 0.5 * L_R_hat + 0.5 * L_R_hat_new
-    global L_M_hat = L_M_hat_new
-    global w_hat = 0.5 * w_hat + 0.5 * w_hat_new
 
     if max(diff_Q, diff_L, diff_w) < TOL
         @printf("  Converged after %d iterations\n", iter)
@@ -451,8 +408,8 @@ println("\nComputing welfare change...")
 
 # Compute baseline Φ (for verification against loaded value)
 # Note: (1-α) = α_housing = housing expenditure share
-Q_term_baseline = Q .^ (-α_housing*ε)
-Φ_check = sum(B[n] * κ_neg_ε_baseline[n,i] * Q_term_baseline[n] * w_ε[i] for n in 1:N, i in 1:N)
+Q_term_baseline = Q .^ (-α_housing * ε)
+Φ_check = sum(B .* Q_term_baseline .* W_access)
 
 # Verify consistency with inversion
 Φ_diff_pct = abs(Φ_check - Φ_baseline_loaded) / Φ_baseline_loaded * 100
@@ -463,15 +420,14 @@ if Φ_diff_pct > 1.0
     println("  WARNING: Large discrepancy in Φ - check that input data matches inversion!")
 end
 
-# Compute Φ_new at counterfactual equilibrium
-Φ_new = sum(B[n] * κ_neg_ε_baseline[n,i] * (κ_hat[n,i]^(-ε)) *
-            (Q[n] * Q_hat[n])^(-α_housing*ε) * (w[i] * w_hat[i])^ε
-            for n in 1:N, i in 1:N)
-
-Φ_hat = Φ_new / Φ_check
+# Compute Φ_hat using exact hat algebra
+s_R = L_R ./ sum(L_R)
+row_term = s_R .* (Q_hat .^ (-α_housing * ε))
+col_term = w_hat .^ ε
+Φ_hat = sum(lambda_cond .* κ_hat_neg_ε .* row_term .* (col_term'))
+Φ_new = Φ_check * Φ_hat
 welfare_change_pct = (Φ_hat^(1/ε) - 1) * 100
 
-println("  Φ_new: $(Φ_new)")
 println("  Φ_hat: $(Φ_hat)")
 println("  Welfare change: $(round(welfare_change_pct, digits=4))%")
 
@@ -494,7 +450,7 @@ println("\nTreated tracts (intensity > 10%, n = $(sum(treated_mask))):")
 println("\nAll tracts (n = $N):")
 @printf("  Mean Q_hat: %.4f (%.2f%% change)\n", mean(Q_hat), (mean(Q_hat)-1)*100)
 @printf("  Mean L_R_hat: %.4f (%.2f%% change)\n", mean(L_R_hat), (mean(L_R_hat)-1)*100)
-@printf("  Mean w_hat: %.4f (should be ~1)\n", mean(w_hat))
+@printf("  Mean w_hat: %.4f\n", mean(w_hat))
 @printf("  Total welfare change: %.4f%%\n", welfare_change_pct)
 
 #=============================================================================

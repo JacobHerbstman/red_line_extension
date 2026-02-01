@@ -1,0 +1,382 @@
+% ======================================================================
+%  Model Section (Replacement Draft)
+%  Spatial commuting model with endogenous wages (labor demand) + inversion
+%  Calibrated/estimated commuting frictions from OD flows and GTFS travel times
+% ======================================================================
+
+\section{Model}\label{sec:model}
+
+We develop a quantitative spatial model of commuting following \cite{monte_commuting_2018} and \cite{ahlfeldt_economics_2015}. The model features heterogeneous workers who choose where to live and where to work, trading off wages, residential amenities, housing costs, and commuting frictions. We use the model to evaluate the welfare effects of the proposed Chicago Transit Authority (CTA) Red Line Extension by constructing baseline fundamentals from observed data and solving counterfactual equilibria implied by changes in travel times.
+
+\subsection{Environment}
+
+The economy consists of a finite set of locations $\mathcal{N}=\{1,\dots,N\}$. A worker chooses a residence $n \in \mathcal{N}$ and a workplace $i \in \mathcal{N}$. In our empirical application, locations are census tracts in Chicago.
+
+Each residence $n$ is endowed with a fixed supply of residential floor space $H_n^R>0$ traded at price $Q_n>0$. The final consumption good is freely traded across locations and is the num\'eraire.
+
+\subsection{Preferences and indirect utility}
+
+Workers have Cobb--Douglas preferences over the num\'eraire consumption good $c$ and residential floor space $h$:
+\begin{equation}
+U_{ni\omega}
+=
+\frac{b_{ni\omega} \, B_n}{\kappa_{ni}}
+\left( \frac{c_{ni}}{\alpha}\right)^{\alpha}
+\left( \frac{h_{ni}}{1-\alpha}\right)^{1-\alpha},
+\qquad 0<\alpha<1,
+\end{equation}
+where:
+\begin{itemize}
+\item $B_n>0$ is a residential amenity for location $n$,
+\item $\kappa_{ni}\ge 1$ is a commuting disutility factor from $n$ to $i$,
+\item $b_{ni\omega}$ is an idiosyncratic taste shock for worker $\omega$ for pair $(n,i)$.
+\end{itemize}
+
+We assume $\{b_{ni\omega}\}$ are i.i.d.\ across workers and residence--workplace pairs and follow a Fr\'echet distribution:
+\begin{equation}
+\Pr(b_{ni\omega}\le b)=\exp(-b^{-\varepsilon}),\qquad \varepsilon>1.
+\end{equation}
+
+A worker living in $n$, working in $i$, and earning wage $w_i$ solves the static problem
+\[
+\max_{c,h}\; U_{ni\omega}
+\quad\text{s.t.}\quad
+c + Q_n h \le w_i.
+\]
+Standard Cobb--Douglas demand implies expenditure shares $\alpha$ on the num\'eraire and $(1-\alpha)$ on housing. Substituting optimal demands yields indirect utility
+\begin{equation}\label{eq:indirect_utility}
+V_{ni\omega}
+=
+b_{ni\omega}\,
+\frac{B_n\, w_i}{\kappa_{ni}\, Q_n^{1-\alpha}}.
+\end{equation}
+
+\subsection{Commuting frictions and travel times}
+
+Let $\tau_{ni}\ge 0$ denote travel time between $n$ and $i$ measured in minutes. We parameterize commuting frictions so that
+\begin{equation}\label{eq:kappa_spec}
+\kappa_{ni}^{-\varepsilon} = \exp(-\nu \tau_{ni}),
+\qquad \nu>0.
+\end{equation}
+Equivalently, $\kappa_{ni} = \exp\!\left( \frac{\nu}{\varepsilon}\tau_{ni}\right)$, so that longer travel times reduce the attractiveness of commuting from $n$ to $i$.
+
+In the empirical implementation, $\tau_{ni}$ is computed from GTFS transit schedules combined with a walking network.
+
+\subsection{Choice probabilities and commuting shares}
+
+Because \eqref{eq:indirect_utility} is linear in Fr\'echet shocks, the standard extreme-value formula yields the probability that a worker chooses the pair $(n,i)$:
+\begin{equation}\label{eq:lambda_ni}
+\lambda_{ni}
+=
+\frac{
+B_n^{\varepsilon}\, Q_n^{-(1-\alpha)\varepsilon}\, w_i^{\varepsilon}\, \kappa_{ni}^{-\varepsilon}
+}{
+\Phi
+},
+\qquad
+\Phi \equiv
+\sum_{r\in\mathcal{N}}\sum_{s\in\mathcal{N}}
+B_r^{\varepsilon}\, Q_r^{-(1-\alpha)\varepsilon}\, w_s^{\varepsilon}\, \kappa_{rs}^{-\varepsilon}.
+\end{equation}
+
+Summing \eqref{eq:lambda_ni} over workplaces gives the residence share:
+\begin{equation}\label{eq:lambda_R}
+\lambda_n^R \equiv \sum_{i\in\mathcal{N}}\lambda_{ni}
+=
+\frac{
+B_n^{\varepsilon}\, Q_n^{-(1-\alpha)\varepsilon}\, \widetilde{W}_n
+}{
+\Phi
+},
+\qquad
+\widetilde{W}_n \equiv \sum_{s\in\mathcal{N}} w_s^{\varepsilon}\, \kappa_{ns}^{-\varepsilon}.
+\end{equation}
+We refer to $\widetilde{W}_n$ as \emph{(epsilon-powered) commuting market access}. In computation, it is convenient to work with $\widetilde{W}_n$ rather than $W_n \equiv \widetilde{W}_n^{1/\varepsilon}$.
+
+Conditional on residing in $n$, the workplace commuting share is
+\begin{equation}\label{eq:lambda_cond}
+\lambda_{ni\mid n}
+\equiv
+\frac{\lambda_{ni}}{\lambda_n^R}
+=
+\frac{
+w_i^{\varepsilon}\, \kappa_{ni}^{-\varepsilon}
+}{
+\sum_{s\in\mathcal{N}} w_s^{\varepsilon}\, \kappa_{ns}^{-\varepsilon}
+}
+=
+\frac{
+w_i^{\varepsilon}\, \kappa_{ni}^{-\varepsilon}
+}{
+\widetilde{W}_n
+}.
+\end{equation}
+
+\subsection{Gravity equation and estimation of $\nu$}
+
+Let $F_{ni}$ denote observed bilateral commuting flows from residence $n$ to workplace $i$. Under the model, $F_{ni}$ is proportional to $\lambda_{ni\mid n}$ times the number of residents in $n$.
+Using \eqref{eq:lambda_cond} and \eqref{eq:kappa_spec}, bilateral commuting flows obey a gravity equation with origin and destination fixed effects:
+\begin{equation}\label{eq:gravity_ppml}
+\mathbb{E}[F_{ni}]
+=
+\exp\!\left(\vartheta_n + \varsigma_i - \nu \tau_{ni}\right),
+\end{equation}
+where $\vartheta_n$ and $\varsigma_i$ absorb the origin and destination shifters implied by $(B_n,Q_n)$ and $w_i$.
+We estimate $\nu$ by PPML with origin and destination fixed effects using observed $F_{ni}$ and GTFS-based travel times $\tau_{ni}$.
+
+\subsection{Production and endogenous wages}
+
+Each workplace $i$ produces the freely traded num\'eraire good using labor with diminishing returns:
+\begin{equation}\label{eq:production}
+Y_i = A_i (L_i^M)^{\gamma},
+\qquad 0<\gamma\le 1,
+\end{equation}
+where $L_i^M$ is employment at workplace $i$ and $A_i>0$ is a productivity fundamental.
+Perfect competition implies that wages equal marginal product:
+\begin{equation}\label{eq:wage}
+w_i = \frac{\partial Y_i}{\partial L_i^M}
+= \gamma A_i (L_i^M)^{\gamma-1}.
+\end{equation}
+When $\gamma=1$, wages are constant and equal to $A_i$; when $\gamma<1$, wages decline in employment and therefore adjust endogenously in counterfactual equilibria when commuting patterns change.
+
+\subsection{Market clearing}
+
+\paragraph{Population.}
+Total population is fixed at $\bar{L}$:
+\begin{equation}\label{eq:pop}
+\sum_{n\in\mathcal{N}} L_n^R = \bar{L},
+\qquad
+L_n^R = \lambda_n^R \bar{L}.
+\end{equation}
+
+\paragraph{Labor market.}
+Workplace employment equals the sum of commuters:
+\begin{equation}\label{eq:labor_clearing}
+L_i^M = \sum_{n\in\mathcal{N}} \lambda_{ni\mid n} L_n^R.
+\end{equation}
+
+\paragraph{Land market.}
+Housing demand for a resident in $n$ who earns wage $w_i$ is $h_{ni} = (1-\alpha) w_i / Q_n$. Aggregating across workers residing in $n$ implies land market clearing:
+\begin{equation}\label{eq:land_clearing}
+Q_n H_n^R = (1-\alpha)\,\bar{w}_n\, L_n^R,
+\qquad
+\bar{w}_n \equiv \sum_{i\in\mathcal{N}} \lambda_{ni\mid n}\, w_i.
+\end{equation}
+
+\subsection{Equilibrium}
+
+An equilibrium consists of wages $\{w_i\}$, productivity fundamentals $\{A_i\}$, floor prices $\{Q_n\}$, amenities $\{B_n\}$, residence populations $\{L_n^R\}$, workplace employment $\{L_i^M\}$, and commuting shares $\{\lambda_{ni},\lambda_{ni\mid n}\}$ such that:
+\begin{enumerate}
+\item workers choose $(n,i)$ optimally, yielding \eqref{eq:lambda_ni}--\eqref{eq:lambda_cond},
+\item population, labor, and land markets clear: \eqref{eq:pop}, \eqref{eq:labor_clearing}, \eqref{eq:land_clearing},
+\item wages satisfy the production condition \eqref{eq:wage}.
+\end{enumerate}
+
+\subsection{Welfare}
+
+Expected utility of a representative worker (ex ante, before idiosyncratic shocks) is proportional to the $\varepsilon$-norm aggregator in \eqref{eq:lambda_ni}. In particular,
+\begin{equation}\label{eq:welfare}
+\bar{U}
+=
+\Gamma\!\left(\frac{\varepsilon-1}{\varepsilon}\right)\,
+\Phi^{1/\varepsilon},
+\end{equation}
+where $\Phi$ is defined in \eqref{eq:lambda_ni}. We report welfare changes via ratios of $\bar{U}$ across equilibria.
+
+% ======================================================================
+%  Baseline inversion (fundamentals from data)
+% ======================================================================
+
+\section{Baseline inversion}\label{sec:inversion}
+
+We recover baseline fundamentals $(w_i,Q_n,B_n,A_i)$ from observed data:
+(i) commuting flows $F_{ni}$, (ii) travel times $\tau_{ni}$, (iii) residence totals $L_n^R$ (RAC), (iv) workplace totals $L_i^M$ (WAC), and (v) floor space supplies $H_n^R$.
+
+\subsection{Step 0: estimate $\nu$ from flows and travel times}
+
+We estimate $\nu$ using PPML gravity with origin and destination fixed effects as in \eqref{eq:gravity_ppml}. This produces $\widehat{\nu}$, which determines $\kappa_{ni}^{-\varepsilon}=\exp(-\widehat{\nu}\tau_{ni})$.
+
+\subsection{Step 1: recover wages from labor market clearing}
+
+Given $\{\kappa_{ni}^{-\varepsilon}\}$ and observed $(L_n^R,L_i^M)$, we recover wages $\{w_i\}$ that satisfy labor market clearing \eqref{eq:labor_clearing} when commuting shares follow \eqref{eq:lambda_cond}.
+
+Let $\omega_i \equiv w_i^{\varepsilon}$. Then \eqref{eq:lambda_cond} implies
+\[
+\lambda_{ni\mid n}
+=
+\frac{\omega_i \kappa_{ni}^{-\varepsilon}}{\sum_{s\in\mathcal{N}} \omega_s \kappa_{ns}^{-\varepsilon}}.
+\]
+Define $\widetilde{W}_n(\omega) \equiv \sum_{s} \omega_s \kappa_{ns}^{-\varepsilon}$. Substituting into \eqref{eq:labor_clearing} yields the system
+\begin{equation}\label{eq:wage_system}
+L_i^M
+=
+\sum_{n\in\mathcal{N}}
+\left(
+\frac{\omega_i \kappa_{ni}^{-\varepsilon}}{\widetilde{W}_n(\omega)}
+\right)
+L_n^R,
+\qquad i\in\mathcal{N}.
+\end{equation}
+We solve \eqref{eq:wage_system} by fixed point iteration. One convenient update is:
+\begin{equation}\label{eq:wage_update}
+\omega_i^{(k+1)}
+=
+\frac{L_i^M}{
+\sum_{n\in\mathcal{N}}
+\left(
+\frac{\kappa_{ni}^{-\varepsilon}}{\widetilde{W}_n(\omega^{(k)})}
+\right)
+L_n^R
+}.
+\end{equation}
+Recovered wages are $w_i = (\omega_i)^{1/\varepsilon}$, up to a common scale normalization.
+
+\subsection{Step 2: floor prices from land market clearing}
+
+Given wages, compute the average wage of residents in $n$:
+\[
+\bar{w}_n = \sum_{i\in\mathcal{N}} \lambda_{ni\mid n} w_i.
+\]
+Then land market clearing \eqref{eq:land_clearing} implies
+\begin{equation}\label{eq:Q_inversion}
+Q_n = \frac{(1-\alpha)\,\bar{w}_n\, L_n^R}{H_n^R}.
+\end{equation}
+
+\subsection{Step 3: amenities from residential shares}
+
+Observed residence shares satisfy $\lambda_n^R = L_n^R/\bar{L}$. Using \eqref{eq:lambda_R}:
+\[
+\lambda_n^R = \frac{B_n^{\varepsilon} Q_n^{-(1-\alpha)\varepsilon}\widetilde{W}_n}{\Phi}.
+\]
+Thus amenities are identified up to a constant:
+\begin{equation}\label{eq:B_inversion}
+B_n^{\varepsilon}
+\propto
+\lambda_n^R\, Q_n^{(1-\alpha)\varepsilon}\, \widetilde{W}_n^{-1}.
+\end{equation}
+We normalize amenities by imposing $\prod_{n\in\mathcal{N}} B_n^{1/N}=1$.
+
+\subsection{Step 4: productivity fundamentals consistent with baseline wages}
+
+Given baseline $(w_i,L_i^M)$ and chosen $\gamma$, equation \eqref{eq:wage} implies baseline productivities:
+\begin{equation}\label{eq:A_inversion}
+A_i = \frac{w_i}{\gamma (L_i^M)^{\gamma-1}}.
+\end{equation}
+These $\{A_i\}$ are held fixed in counterfactuals.
+
+% ======================================================================
+%  Counterfactual (Red Line Extension)
+% ======================================================================
+
+\section{Counterfactual equilibrium and welfare}\label{sec:counterfactual}
+
+We evaluate the Red Line Extension by recomputing travel times $\tau_{ni}'$ under the proposed transit network and solving for the resulting equilibrium.
+
+\subsection{Counterfactual commuting frictions}
+
+Given counterfactual travel times $\tau_{ni}'$, define
+\[
+(\kappa_{ni}')^{-\varepsilon}=\exp(-\nu \tau_{ni}'),
+\qquad
+\widehat{\kappa}_{ni}^{-\varepsilon}
+\equiv
+\frac{(\kappa_{ni}')^{-\varepsilon}}{\kappa_{ni}^{-\varepsilon}}
+=
+\exp\!\left(-\nu(\tau_{ni}'-\tau_{ni})\right).
+\]
+We treat amenities $\{B_n\}$, housing supply $\{H_n^R\}$, and productivities $\{A_i\}$ as fixed.
+
+\subsection{Equilibrium in changes (exact hat algebra)}
+
+Let hats denote counterfactual-to-baseline ratios: $\widehat{x}\equiv x'/x$.
+From \eqref{eq:lambda_ni}, commuting probabilities in changes satisfy
+\begin{equation}\label{eq:lambda_hat}
+\widehat{\lambda}_{ni}
+=
+\frac{
+\widehat{\kappa}_{ni}^{-\varepsilon}\,
+\widehat{Q}_n^{-(1-\alpha)\varepsilon}\,
+\widehat{w}_i^{\varepsilon}
+}{
+\sum_{r\in\mathcal{N}}\sum_{s\in\mathcal{N}}
+\lambda_{rs}\,
+\widehat{\kappa}_{rs}^{-\varepsilon}\,
+\widehat{Q}_r^{-(1-\alpha)\varepsilon}\,
+\widehat{w}_s^{\varepsilon}
+},
+\end{equation}
+where we used $\widehat{B}_n=1$. Conditional commuting shares update as
+\[
+\lambda'_{ni\mid n}
+=
+\frac{\lambda_{ni\mid n}\,
+\widehat{\kappa}_{ni}^{-\varepsilon}\,
+\widehat{w}_i^{\varepsilon}}
+{\sum_{s}\lambda_{ns\mid n}\,
+\widehat{\kappa}_{ns}^{-\varepsilon}\,
+\widehat{w}_s^{\varepsilon}}.
+\]
+
+Labor market clearing in changes is
+\begin{equation}\label{eq:LM_hat}
+\widehat{L}_i^M L_i^M
+=
+\sum_{n\in\mathcal{N}}
+\lambda'_{ni\mid n}\,
+\widehat{L}_n^R L_n^R.
+\end{equation}
+
+Land market clearing in changes (with fixed $H_n^R$) implies
+\begin{equation}\label{eq:Q_hat}
+\widehat{Q}_n
+=
+\widehat{\bar{w}}_n\,
+\widehat{L}_n^R,
+\qquad
+\bar{w}_n' = \sum_i \lambda'_{ni\mid n}\, w_i'.
+\end{equation}
+
+Wages are endogenous through production. Holding $\widehat{A}_i=1$, \eqref{eq:wage} implies the wage equation in changes:
+\begin{equation}\label{eq:w_hat}
+\widehat{w}_i
+=
+(\widehat{L}_i^M)^{\gamma-1}.
+\end{equation}
+
+Population is conserved:
+\begin{equation}\label{eq:pop_hat}
+\sum_{n\in\mathcal{N}} \widehat{L}_n^R L_n^R = \bar{L}.
+\end{equation}
+
+\subsection{Solution algorithm}
+
+We solve \eqref{eq:lambda_hat}--\eqref{eq:pop_hat} by fixed point iteration over $(\widehat{Q},\widehat{L}^R,\widehat{w})$:
+\begin{enumerate}
+\item Initialize $\widehat{Q}_n^{(0)}=1$, $\widehat{L}_n^{R,(0)}=1$, and $\widehat{w}_i^{(0)}=1$ for all $n,i$.
+\item Given current $(\widehat{Q},\widehat{w})$, compute updated conditional shares $\lambda'_{ni\mid n}$ using $\widehat{\kappa}^{-\varepsilon}$ and \eqref{eq:lambda_hat}.
+\item Update workplace employment using \eqref{eq:LM_hat} and obtain $\widehat{L}^M$.
+\item Update wages using \eqref{eq:w_hat}.
+\item Update residential shares and populations using \eqref{eq:lambda_R} in changes (equivalently implied by \eqref{eq:lambda_hat} summing over $i$), enforcing \eqref{eq:pop_hat}.
+\item Update floor prices using \eqref{eq:Q_hat}.
+\item Iterate until convergence.
+\end{enumerate}
+
+\subsection{Welfare change}
+
+From \eqref{eq:welfare}, welfare changes satisfy
+\begin{equation}\label{eq:welfare_hat}
+\frac{\bar{U}'}{\bar{U}}
+=
+\left(
+\sum_{n\in\mathcal{N}}\sum_{i\in\mathcal{N}}
+\lambda_{ni}\,
+\widehat{\kappa}_{ni}^{-\varepsilon}\,
+\widehat{Q}_n^{-(1-\alpha)\varepsilon}\,
+\widehat{w}_i^{\varepsilon}
+\right)^{1/\varepsilon}.
+\end{equation}
+This expression aggregates direct gains from reduced commuting disutility and indirect general equilibrium effects through housing prices, population reallocation, and endogenous wages.
+
+\subsection{Remarks}
+
+This model intentionally abstracts from trade costs in goods and from endogenous amenities/productivities beyond \eqref{eq:production}. It is designed to be minimally sufficient for counterfactual evaluation of commuting-time shocks (such as the Red Line Extension) while remaining disciplined by observed commuting flows (through estimation of $\nu$) and observed residence/workplace totals (through inversion of fundamentals).

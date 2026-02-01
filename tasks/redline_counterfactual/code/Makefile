@@ -76,7 +76,8 @@ define GEN_COUNTERFACTUAL_RULES
     run_counterfactual.jl \
     ../input/model_fundamentals.csv \
     ../input/model_parameters.csv \
-    ../input/commuting_matrix.csv \
+    ../input/commuting_shares_model.csv \
+    ../input/travel_time_change.csv \
     ../input/tract_floorspace.csv \
     | ../output
 	$(JULIA) run_counterfactual.jl $(radius) $(reduction)
@@ -105,7 +106,10 @@ $(SUMMARY_OUTPUTS): summarize_counterfactuals.R $(COUNTERFACTUAL_OUTPUTS) $(WELF
 ../input/model_parameters.csv: ../../invert_model/output/model_parameters.csv | ../input
 	ln -sf $< $@
 
-../input/commuting_matrix.csv: ../../estimate_gravity/output/commuting_matrix.csv | ../input
+../input/travel_time_change.csv: ../../compute_travel_times/output/travel_time_change.csv | ../input
+	ln -sf $< $@
+
+../input/commuting_shares_model.csv: ../../invert_model/output/commuting_shares_model.csv | ../input
 	ln -sf $< $@
 
 ../input/chicago_tracts.gpkg: ../../download_census_tracts/output/chicago_tracts_2010.gpkg | ../input
@@ -128,5 +132,6 @@ clean:
 .PHONY: all main clean link-inputs
 
 link-inputs: ../input/model_fundamentals.csv ../input/model_parameters.csv \
-             ../input/commuting_matrix.csv ../input/chicago_tracts.gpkg \
+             ../input/commuting_shares_model.csv \
+             ../input/travel_time_change.csv ../input/chicago_tracts.gpkg \
              ../input/tract_floorspace.csv

@@ -119,6 +119,10 @@ if (!is.null(ppml_between)) {
   message(sprintf("  => nu = %.5f", nu_ppml))
   message(sprintf("  => %.2f%% fewer commuters per minute", 100 * (1 - exp(-nu_ppml))))
 
+  if (nu_ppml <= 0) {
+    stop("Estimated nu is non-positive. Check travel_time_min and flow data.")
+  }
+
   results_list[["PPML Two-way FE"]] <- data.table(
     specification = "PPML Two-way FE",
     estimator = "Poisson PML",
@@ -234,6 +238,22 @@ models <- list(
 )
 saveRDS(models, "../output/gravity_models_travel_time.rds")
 message("Saved: ../output/gravity_models_travel_time.rds")
+
+# Save nu for downstream inversion
+if (!is.null(ppml_between)) {
+  nu_out <- data.table(parameter = "nu_time_per_min", value = nu_ppml)
+  fwrite(nu_out, "../output/nu_time_per_min.csv")
+  message("Saved: ../output/nu_time_per_min.csv")
+
+  # Save destination fixed effects for wage initialization
+  fe <- fixef(ppml_between)
+  if (!is.null(fe$dest_tract)) {
+    dest_fe <- data.table(dest_tract = names(fe$dest_tract),
+                          dest_fe = as.numeric(fe$dest_tract))
+    fwrite(dest_fe, "../output/gravity_destination_fe.csv")
+    message("Saved: ../output/gravity_destination_fe.csv")
+  }
+}
 
 # Save merged data for downstream use
 fwrite(commuting, "../output/gravity_data_travel_time.csv")

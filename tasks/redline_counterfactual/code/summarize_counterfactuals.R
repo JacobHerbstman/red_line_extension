@@ -135,7 +135,7 @@ cat("\nSaved: counterfactual_main_spec.csv\n")
 
 robustness_table <- welfare_results %>%
   mutate(
-    spec_label = sprintf("r=%dm, κ↓%d%%", catchment_radius_m, kappa_reduction_pct),
+    spec_label = sprintf("r=%dm, Δτ×%d%%", catchment_radius_m, kappa_reduction_pct),
     main_spec = (catchment_radius_m == 800 & kappa_reduction_pct == 20)
   ) %>%
   select(
@@ -241,8 +241,8 @@ p_intensity <- ggplot() +
   geom_text(data = rle_stations, aes(x = lon, y = lat, label = station),
             nudge_x = 0.015, size = 2.5, hjust = 0, color = "white") +
   labs(
-    title = "Treatment Intensity (Spatial Decay from RLE Stations)",
-    subtitle = sprintf("Gaussian decay with σ = 800m; %d tracts with intensity > 10%%", 
+    title = "Treatment Intensity (GTFS Time Improvements)",
+    subtitle = sprintf("Intensity from mean travel-time improvement; %d tracts with intensity > 10%%", 
                        sum(main_spec$intensity > 0.1, na.rm = TRUE))
   ) +
   map_theme
@@ -264,7 +264,7 @@ p_zoom <- ggplot() +
   coord_sf(xlim = c(-87.70, -87.55), ylim = c(41.63, 41.75)) +
   labs(
     title = "Red Line Extension: Floor Price Changes (Detail)",
-    subtitle = "Main specification: 800m catchment, 20% κ reduction"
+    subtitle = "Main specification: 800m catchment, 20% kappa reduction"
   ) +
   map_theme
 
@@ -373,8 +373,8 @@ p_robust <- welfare_results %>%
   scale_color_brewer(palette = "Set1", name = "Catchment\nRadius") +
   labs(
     title = "Welfare Effects Across Specifications",
-    subtitle = "Diamond indicates main specification (800m, 20%)",
-    x = "Commuting Cost Reduction",
+    subtitle = "Diamond indicates main specification (800m, 20% GTFS scale)",
+    x = "GTFS Time-Change Scale",
     y = "Welfare Change (%)"
   ) +
   theme_minimal() +
