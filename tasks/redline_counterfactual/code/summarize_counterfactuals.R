@@ -225,27 +225,29 @@ p_pop <- ggplot() +
 ggsave("../output/map_population_change.pdf", p_pop, width = 8, height = 10)
 cat("  Saved: map_population_change.pdf\n")
 
-# 3. Tract-level welfare/utility map (approximated by access change)
-# Welfare by tract can be approximated by the change in expected utility
-# which depends on Q_hat and access changes
-
-# For now, just show which tracts are treated
-p_treated <- ggplot() +
-  geom_sf(data = main_spec_sf, aes(fill = treated), color = "gray70", size = 0.1) +
-  scale_fill_manual(values = c("FALSE" = "gray90", "TRUE" = "steelblue"),
-                    name = "Treated",
-                    labels = c("No", "Yes")) +
+# 3. Treatment intensity map (showing continuous spatial decay)
+# This shows the Gaussian decay of treatment intensity from stations
+p_intensity <- ggplot() +
+  geom_sf(data = main_spec_sf, aes(fill = intensity), color = "gray70", linewidth = 0.05) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "Treatment\nIntensity",
+    trans = "sqrt",  # Square root transform to show gradient better
+    limits = c(0, 1),
+    oob = scales::squish
+  ) +
   geom_point(data = rle_stations, aes(x = lon, y = lat), 
-             color = "red", size = 3, shape = 17) +
+             color = "white", size = 3, shape = 17) +
   geom_text(data = rle_stations, aes(x = lon, y = lat, label = station),
-            nudge_x = 0.015, size = 2.5, hjust = 0) +
+            nudge_x = 0.015, size = 2.5, hjust = 0, color = "white") +
   labs(
-    title = "Treated Tracts (within 800m of new RLE stations)",
-    subtitle = sprintf("%d tracts affected", sum(main_spec$treated, na.rm = TRUE))
+    title = "Treatment Intensity (Spatial Decay from RLE Stations)",
+    subtitle = sprintf("Gaussian decay with σ = 800m; %d tracts with intensity > 10%%", 
+                       sum(main_spec$intensity > 0.1, na.rm = TRUE))
   ) +
   map_theme
 
-ggsave("../output/map_welfare_by_tract.pdf", p_treated, width = 8, height = 10)
+ggsave("../output/map_welfare_by_tract.pdf", p_intensity, width = 8, height = 10)
 cat("  Saved: map_welfare_by_tract.pdf\n")
 
 # 4. Zoomed map of RLE area
@@ -268,6 +270,87 @@ p_zoom <- ggplot() +
 
 ggsave("../output/map_price_change_zoom.pdf", p_zoom, width = 8, height = 8)
 cat("  Saved: map_price_change_zoom.pdf\n")
+
+# 5. Combined counterfactual maps (2x2 grid like diagnostic maps)
+cat("  Creating combined counterfactual maps...\n")
+
+# Common map theme for grid
+grid_map_theme <- theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "bottom",
+    legend.key.width = unit(1.2, "cm"),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 8)
+  )
+
+# Wage changes map
+p_wages <- ggplot() +
+  geom_sf(data = main_spec_sf, aes(fill = w_pct_change), color = NA) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "Wage % Change",
+    oob = scales::squish
+  ) +
+  geom_point(data = rle_stations, aes(x = lon, y = lat), 
+             color = "white", size = 1.5, shape = 17) +
+  labs(title = "Wage Changes") +
+  grid_map_theme
+
+# Floor price changes map  
+p_prices <- ggplot() +
+  geom_sf(data = main_spec_sf, aes(fill = Q_pct_change), color = NA) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "Price % Change",
+    oob = scales::squish
+  ) +
+  geom_point(data = rle_stations, aes(x = lon, y = lat), 
+             color = "white", size = 1.5, shape = 17) +
+  labs(title = "Floor Price Changes") +
+  grid_map_theme
+
+# Population changes map
+p_popgrid <- ggplot() +
+  geom_sf(data = main_spec_sf, aes(fill = L_R_pct_change), color = NA) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "Pop % Change",
+    oob = scales::squish
+  ) +
+  geom_point(data = rle_stations, aes(x = lon, y = lat), 
+             color = "white", size = 1.5, shape = 17) +
+  labs(title = "Population Changes") +
+  grid_map_theme
+
+# Treatment intensity map
+p_intensity_grid <- ggplot() +
+  geom_sf(data = main_spec_sf, aes(fill = intensity), color = NA) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "Intensity",
+    trans = "sqrt",
+    limits = c(0, 1),
+    oob = scales::squish
+  ) +
+  geom_point(data = rle_stations, aes(x = lon, y = lat), 
+             color = "white", size = 1.5, shape = 17) +
+  labs(title = "Treatment Intensity") +
+  grid_map_theme
+
+# Combine into 2x2 grid
+p_combined <- grid.arrange(
+  p_wages, p_prices,
+  p_popgrid, p_intensity_grid,
+  nrow = 2, ncol = 2,
+  top = "Red Line Extension Counterfactual Effects"
+)
+
+ggsave("../output/counterfactual_maps.pdf", p_combined, width = 10, height = 12)
+cat("  Saved: counterfactual_maps.pdf\n")
 
 # ----------------------------------------------------------------------------
 # Robustness Plot
