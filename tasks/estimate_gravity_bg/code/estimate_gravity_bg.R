@@ -1,9 +1,14 @@
 # estimate_gravity_bg.R
 # Estimate gravity equations at BLOCK GROUP level
 #
-# TWO SPECIFICATIONS ONLY (as requested):
-# 1. Poisson PML (Primary - handles zeros, consistent)
-# 2. OLS on positive flows (Comparison)
+# THREE TRAVEL TIME SPECIFICATIONS:
+# 1. Transit only
+# 2. Car only (NEW)
+# 3. Min(transit, car) (NEW)
+#
+# For each travel time, estimate:
+# - Poisson PML (Primary - handles zeros, consistent)
+# - OLS on positive flows (Comparison)
 #
 # CRITICAL: NO log(x+1) transformations! (Santos Silva & Tenreyro 2006)
 
@@ -11,6 +16,7 @@ source("../../setup_environment/code/packages.R")
 
 message("=============================================================")
 message("Estimating Gravity Equations at Block Group Level")
+message("Transit, Car, and Min(transit, car) specifications")
 message("=============================================================")
 message("Santos Silva & Tenreyro (2006): Use PPML, not log(x+1)!")
 
@@ -18,19 +24,22 @@ message("Santos Silva & Tenreyro (2006): Use PPML, not log(x+1)!")
 # 1. LOAD DATA
 # =============================================================================
 
-message("\n[1/5] Loading data...")
+message("\n[1/6] Loading data...")
 
 # Block group LODES data
 lodes_od <- fread("../input/lodes_od_bg_2019.csv",
                   colClasses = c(h_bg = "character", w_bg = "character"))
 message(sprintf("LODES OD flows: %s rows", format(nrow(lodes_od), big.mark = ",")))
 
-# Travel time matrix (baseline)
-travel_times <- fread("../input/travel_time_matrix_baseline_bg.csv",
+# Travel time matrix with all modes (transit, car, min)
+travel_times <- fread("../input/travel_time_all_modes_bg.csv",
                       colClasses = c(origin_bg = "character", dest_bg = "character"))
 message(sprintf("Travel time matrix: %s rows", format(nrow(travel_times), big.mark = ",")))
 
-# Block group centroids (for distance calculation)
+# Check available columns
+message(sprintf("Travel time columns: %s", paste(names(travel_times), collapse = ", ")))
+
+# Block group centroids
 centroids <- fread("../input/block_group_centroids.csv",
                    colClasses = c(id = "character"))
 message(sprintf("Block groups: %d", nrow(centroids)))
@@ -39,7 +48,7 @@ message(sprintf("Block groups: %d", nrow(centroids)))
 # 2. BUILD GRAVITY DATASET
 # =============================================================================
 
-message("\n[2/5] Building gravity dataset...")
+message("\n[2/6] Building gravity dataset...")
 
 # Rename LODES columns for consistency
 lodes_od <- lodes_od %>%
@@ -48,277 +57,313 @@ lodes_od <- lodes_od %>%
 # Merge LODES with travel times
 gravity_data <- merge(
   lodes_od[, .(origin_bg, dest_bg, commuters)],
-  travel_times[, .(origin_bg, dest_bg, travel_time_min)],
+  travel_times,
   by = c("origin_bg", "dest_bg"),
   all.x = TRUE
 )
 
 message(sprintf("After merging: %s rows", format(nrow(gravity_data), big.mark = ",")))
-message(sprintf("Rows with travel time: %s",
-                format(sum(!is.na(gravity_data$travel_time_min)), big.mark = ",")))
 
-# Filter to rows with valid travel time
-gravity_data <- gravity_data[!is.na(travel_time_min)]
-message(sprintf("After filtering missing travel times: %s rows",
-                format(nrow(gravity_data), big.mark = ",")))
+# Check for travel time columns
+has_transit <- "travel_time_transit_baseline" %in% names(gravity_data)
+has_car <- "travel_time_car" %in% names(gravity_data)
+has_min <- "travel_time_min_baseline" %in% names(gravity_data)
+
+message(sprintf("Has transit times: %s", has_transit))
+message(sprintf("Has car times: %s", has_car))
+message(sprintf("Has min(transit, car): %s", has_min))
+
+# Filter to rows with valid travel time (at least one mode)
+if (has_transit) {
+  valid_rows <- !is.na(gravity_data$travel_time_transit_baseline)
+} else {
+  valid_rows <- rep(TRUE, nrow(gravity_data))
+}
+
+gravity_data <- gravity_data[valid_rows]
+message(sprintf("After filtering: %s rows", format(nrow(gravity_data), big.mark = ",")))
 
 # Create within-BG indicator
 gravity_data[, within_bg := (origin_bg == dest_bg)]
 
-# Log travel time for gravity specification (for positive times)
-gravity_data[, log_travel_time := ifelse(travel_time_min > 0, log(travel_time_min), NA_real_)]
-
 # Log commuters ONLY for positive flows (for OLS)
-# NEVER do log(commuters + 1) - that's econometrically invalid!
 gravity_data[, log_commuters := ifelse(commuters > 0, log(commuters), NA_real_)]
 
 # Summary
 message(sprintf("\nPositive flows: %s (%.1f%%)",
                 format(sum(gravity_data$commuters > 0), big.mark = ","),
                 100 * mean(gravity_data$commuters > 0)))
-message(sprintf("Zero flows: %s (%.1f%%)",
-                format(sum(gravity_data$commuters == 0), big.mark = ","),
-                100 * mean(gravity_data$commuters == 0)))
 message(sprintf("Within-BG flows: %s",
                 format(sum(gravity_data$within_bg), big.mark = ",")))
+
+if (has_transit) {
+  message(sprintf("Mean transit time: %.1f min", mean(gravity_data$travel_time_transit_baseline, na.rm = TRUE)))
+}
+if (has_car) {
+  message(sprintf("Mean car time: %.1f min", mean(gravity_data$travel_time_car, na.rm = TRUE)))
+}
+if (has_min) {
+  message(sprintf("Mean min(transit, car) time: %.1f min", mean(gravity_data$travel_time_min_baseline, na.rm = TRUE)))
+}
 
 # Convert to factors for fixest
 gravity_data[, origin_bg := as.factor(origin_bg)]
 gravity_data[, dest_bg := as.factor(dest_bg)]
 
 # =============================================================================
-# 3. POISSON PML ESTIMATION (PRIMARY)
+# 3. ESTIMATE GRAVITY FOR EACH TRAVEL TIME MEASURE
 # =============================================================================
 
-message("\n=============================================================")
-message("[3/5] POISSON PML ESTIMATION (Primary Specification)")
-message("=============================================================")
-message("This is the preferred method - handles zeros, consistent with theory")
+# Function to estimate gravity with a given travel time variable
+estimate_gravity <- function(data, tt_var, label) {
+  message(sprintf("\n--- Estimating gravity with %s ---", label))
 
-tic("PPML estimation")
+  # Prepare data - filter to valid travel times and between-BG
+  df <- data[!is.na(get(tt_var)) & get(tt_var) > 0 & within_bg == FALSE]
+  message(sprintf("Sample size: %s rows", format(nrow(df), big.mark = ",")))
 
-# Between-BG flows only (exclude within-BG where travel_time = 0)
-df_between <- gravity_data[within_bg == FALSE & !is.na(travel_time_min)]
-message(sprintf("Between-BG pairs for PPML: %s", format(nrow(df_between), big.mark = ",")))
+  if (nrow(df) < 1000) {
+    message("WARNING: Too few observations, skipping")
+    return(list(ppml = NULL, ols = NULL))
+  }
 
-# Primary specification: Poisson PML with two-way FE
-message("\nEstimating PPML with origin + destination FE...")
-message("(This may take several minutes with large number of FEs)")
-
-ppml_twoway <- tryCatch({
-  fepois(
-    commuters ~ travel_time_min | origin_bg + dest_bg,
-    data = df_between,
-    glm.iter = 100,
-    verbose = 1
-  )
-}, error = function(e) {
-  message(sprintf("PPML two-way FE failed: %s", e$message))
-  message("Trying with fewer iterations...")
-  tryCatch({
+  # PPML
+  message("Estimating PPML...")
+  ppml <- tryCatch({
     fepois(
-      commuters ~ travel_time_min | origin_bg + dest_bg,
-      data = df_between,
-      glm.iter = 50
+      as.formula(paste("commuters ~", tt_var, "| origin_bg + dest_bg")),
+      data = df,
+      glm.iter = 100,
+      verbose = 0
     )
-  }, error = function(e2) {
-    message(sprintf("Still failed: %s", e2$message))
+  }, error = function(e) {
+    message(sprintf("PPML failed: %s", e$message))
     NULL
   })
-})
 
-toc()
+  if (!is.null(ppml)) {
+    coef_ppml <- coef(ppml)[tt_var]
+    se_ppml <- se(ppml)[tt_var]
+    message(sprintf("  PPML coef: %.6f (SE = %.6f), nu = %.4f", coef_ppml, se_ppml, -coef_ppml))
+  }
 
-if (!is.null(ppml_twoway)) {
-  # Get coefficients
-  ppml_coef <- coef(ppml_twoway)["travel_time_min"]
-  ppml_se <- se(ppml_twoway)["travel_time_min"]
-  ppml_nu <- -ppml_coef
+  # OLS on positive flows
+  df_pos <- df[commuters > 0 & !is.na(log_commuters)]
+  message("Estimating OLS (positive flows only)...")
 
-  message(sprintf("\n=== PPML RESULTS ==="))
-  message(sprintf("Coefficient on travel_time_min: %.6f (SE = %.6f)", ppml_coef, ppml_se))
-  message(sprintf("Distance semi-elasticity (nu): %.4f", ppml_nu))
-  message(sprintf("Interpretation: 1 minute increase -> %.2f%% fewer commuters",
-                  100 * (1 - exp(ppml_coef))))
-  message(sprintf("N observations: %s", format(ppml_twoway$nobs, big.mark = ",")))
+  ols <- tryCatch({
+    feols(
+      as.formula(paste("log_commuters ~", tt_var, "| origin_bg + dest_bg")),
+      data = df_pos
+    )
+  }, error = function(e) {
+    message(sprintf("OLS failed: %s", e$message))
+    NULL
+  })
+
+  if (!is.null(ols)) {
+    coef_ols <- coef(ols)[tt_var]
+    se_ols <- se(ols)[tt_var]
+    message(sprintf("  OLS coef: %.6f (SE = %.6f), nu = %.4f", coef_ols, se_ols, -coef_ols))
+  }
+
+  return(list(ppml = ppml, ols = ols, label = label, tt_var = tt_var))
+}
+
+# Store all results
+all_results <- list()
+
+message("\n=============================================================")
+message("[3/6] TRANSIT Travel Time Estimation")
+message("=============================================================")
+
+if (has_transit) {
+  all_results$transit <- estimate_gravity(gravity_data, "travel_time_transit_baseline", "Transit")
 } else {
-  message("PPML estimation failed - see errors above")
-  ppml_coef <- NA
-  ppml_se <- NA
-  ppml_nu <- NA
+  message("Transit travel times not available")
+}
+
+message("\n=============================================================")
+message("[4/6] CAR Travel Time Estimation")
+message("=============================================================")
+
+if (has_car) {
+  all_results$car <- estimate_gravity(gravity_data, "travel_time_car", "Car")
+} else {
+  message("Car travel times not available")
+}
+
+message("\n=============================================================")
+message("[5/6] MIN(Transit, Car) Travel Time Estimation")
+message("=============================================================")
+
+if (has_min) {
+  all_results$min <- estimate_gravity(gravity_data, "travel_time_min_baseline", "Min(transit, car)")
+} else {
+  message("Min travel times not available")
 }
 
 # =============================================================================
-# 4. OLS ESTIMATION (COMPARISON)
+# 4. COMPILE RESULTS TABLE
 # =============================================================================
 
 message("\n=============================================================")
-message("[4/5] OLS ESTIMATION (Comparison - positive flows only)")
+message("[6/6] Compiling and Saving Results")
 message("=============================================================")
-message("Note: OLS drops zeros, which may bias results")
 
-tic("OLS estimation")
+# Build results table
+results_list <- list()
 
-# Positive flows only for OLS
-df_positive <- gravity_data[commuters > 0 & within_bg == FALSE & !is.na(log_commuters)]
-message(sprintf("Positive between-BG flows for OLS: %s", format(nrow(df_positive), big.mark = ",")))
+for (mode in names(all_results)) {
+  res <- all_results[[mode]]
+  if (is.null(res)) next
 
-# OLS with two-way FE
-message("\nEstimating OLS with origin + destination FE...")
+  # PPML row
+  if (!is.null(res$ppml)) {
+    results_list[[paste0(mode, "_ppml")]] <- data.table(
+      mode = mode,
+      specification = paste("PPML", res$label),
+      estimator = "Poisson PML",
+      travel_time_var = res$tt_var,
+      coef = coef(res$ppml)[res$tt_var],
+      se = se(res$ppml)[res$tt_var],
+      nu = -coef(res$ppml)[res$tt_var],
+      n_obs = res$ppml$nobs,
+      pct_change_per_min = 100 * (1 - exp(coef(res$ppml)[res$tt_var]))
+    )
+  }
 
-ols_twoway <- tryCatch({
-  feols(
-    log_commuters ~ travel_time_min | origin_bg + dest_bg,
-    data = df_positive
-  )
-}, error = function(e) {
-  message(sprintf("OLS failed: %s", e$message))
-  NULL
-})
-
-toc()
-
-if (!is.null(ols_twoway)) {
-  # Get coefficients with clustered SEs
-  ols_coef <- coef(ols_twoway)["travel_time_min"]
-  ols_se <- se(ols_twoway)["travel_time_min"]
-  ols_nu <- -ols_coef
-
-  # Two-way clustered SEs
-  ols_cl <- summary(ols_twoway, vcov = ~origin_bg + dest_bg)
-  ols_se_cl <- se(ols_cl)["travel_time_min"]
-
-  message(sprintf("\n=== OLS RESULTS ==="))
-  message(sprintf("Coefficient on travel_time_min: %.6f", ols_coef))
-  message(sprintf("SE (default): %.6f", ols_se))
-  message(sprintf("SE (two-way clustered): %.6f", ols_se_cl))
-  message(sprintf("Distance semi-elasticity (nu): %.4f", ols_nu))
-  message(sprintf("Interpretation: 1 minute increase -> %.2f%% fewer commuters",
-                  100 * (1 - exp(ols_coef))))
-  message(sprintf("N observations: %s", format(ols_twoway$nobs, big.mark = ",")))
-  message(sprintf("R-squared (within): %.4f", r2(ols_twoway, "wr2")))
-} else {
-  message("OLS estimation failed")
-  ols_coef <- NA
-  ols_se <- NA
-  ols_se_cl <- NA
-  ols_nu <- NA
+  # OLS row
+  if (!is.null(res$ols)) {
+    results_list[[paste0(mode, "_ols")]] <- data.table(
+      mode = mode,
+      specification = paste("OLS", res$label),
+      estimator = "OLS",
+      travel_time_var = res$tt_var,
+      coef = coef(res$ols)[res$tt_var],
+      se = se(res$ols)[res$tt_var],
+      nu = -coef(res$ols)[res$tt_var],
+      n_obs = res$ols$nobs,
+      pct_change_per_min = 100 * (1 - exp(coef(res$ols)[res$tt_var]))
+    )
+  }
 }
 
-# =============================================================================
-# 5. SAVE RESULTS AND CREATE OUTPUTS
-# =============================================================================
+results <- rbindlist(results_list)
 
-message("\n=============================================================")
-message("[5/5] Saving Results")
-message("=============================================================")
-
-# Results table
-results <- data.table(
-  specification = c("PPML Two-way FE", "OLS Two-way FE"),
-  estimator = c("Poisson PML", "OLS"),
-  sample = c("All flows (between-BG)", "Positive flows (between-BG)"),
-  coef_travel_time = c(ppml_coef, ols_coef),
-  se = c(ppml_se, ols_se),
-  se_clustered = c(NA, ols_se_cl),
-  nu = c(ppml_nu, ols_nu),
-  n_obs = c(
-    ifelse(!is.null(ppml_twoway), ppml_twoway$nobs, NA),
-    ifelse(!is.null(ols_twoway), ols_twoway$nobs, NA)
-  ),
-  pct_change_per_min = c(
-    ifelse(!is.na(ppml_coef), 100 * (1 - exp(ppml_coef)), NA),
-    ifelse(!is.na(ols_coef), 100 * (1 - exp(ols_coef)), NA)
-  )
-)
-
+# Save results
 fwrite(results, "../output/gravity_estimates_bg.csv")
 message("Saved: ../output/gravity_estimates_bg.csv")
 
-# Save models for later use
-models <- list(
-  ppml = ppml_twoway,
-  ols = ols_twoway
-)
+# Save models
+models <- all_results
 saveRDS(models, "../output/gravity_models_bg.rds")
 message("Saved: ../output/gravity_models_bg.rds")
 
-# Save gravity data for diagnostics/visualization
-fwrite(gravity_data[, .(origin_bg, dest_bg, commuters, travel_time_min, within_bg)],
-       "../output/gravity_data_bg.csv")
-message("Saved: ../output/gravity_data_bg.csv")
-
 # =============================================================================
-# 6. CREATE BINSCATTER PLOT (Berlin Figure 4A style)
+# 5. CREATE COMPARISON PLOTS
 # =============================================================================
 
-message("\n=============================================================")
-message("Creating Binscatter Visualization")
-message("=============================================================")
+message("\nCreating comparison plots...")
 
-if (!is.null(ols_twoway)) {
-  # Residualize both log(flow) and travel_time on origin + destination FE
-  # This is what the binscatter should show - partial correlation
+# Comparison bar chart of nu values
+if (nrow(results) > 0) {
+  p_compare <- ggplot(results, aes(x = specification, y = nu, fill = mode)) +
+    geom_col(position = "dodge") +
+    geom_hline(yintercept = 0.035, linetype = "dashed", color = "red", linewidth = 1) +
+    annotate("text", x = 0.5, y = 0.037, label = "Berlin benchmark (0.035/min)",
+             hjust = 0, color = "red", size = 3) +
+    labs(
+      title = "Distance Semi-Elasticity (nu) by Travel Time Measure",
+      subtitle = "Block Group Level Gravity Estimation",
+      x = NULL,
+      y = "nu (distance semi-elasticity)",
+      fill = "Travel Time Mode"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    coord_flip()
 
-  # Get residuals from OLS model
-  df_positive[, resid_log_flow := residuals(ols_twoway)]
+  ggsave("../output/gravity_comparison_bg.pdf", p_compare, width = 10, height = 6)
+  message("Saved: ../output/gravity_comparison_bg.pdf")
+}
 
-  # Residualize travel time on same FEs
-  travel_time_resid_model <- feols(travel_time_min ~ 1 | origin_bg + dest_bg, data = df_positive)
-  df_positive[, resid_travel_time := residuals(travel_time_resid_model)]
+# Binscatter for car (if available)
+if (!is.null(all_results$car$ols)) {
+  df_car <- gravity_data[!is.na(travel_time_car) & travel_time_car > 0 &
+                          within_bg == FALSE & commuters > 0]
 
-  # Create bins
-  n_bins <- 20
-  df_positive[, bin := cut(resid_travel_time, breaks = n_bins, labels = FALSE)]
+  # Get residuals
+  df_car[, resid_log_flow := residuals(all_results$car$ols)]
+  tt_resid <- feols(travel_time_car ~ 1 | origin_bg + dest_bg, data = df_car)
+  df_car[, resid_tt := residuals(tt_resid)]
 
-  bin_means <- df_positive[!is.na(bin), .(
-    mean_resid_travel_time = mean(resid_travel_time, na.rm = TRUE),
-    mean_resid_log_flow = mean(resid_log_flow, na.rm = TRUE),
+  # Binned means
+  df_car[, bin := cut(resid_tt, breaks = 20, labels = FALSE)]
+  bin_means <- df_car[!is.na(bin), .(
+    mean_tt = mean(resid_tt, na.rm = TRUE),
+    mean_flow = mean(resid_log_flow, na.rm = TRUE),
     n = .N
   ), by = bin]
 
-  # Create plot
-  p_binscatter <- ggplot(bin_means, aes(x = mean_resid_travel_time, y = mean_resid_log_flow)) +
-    geom_point(aes(size = n), alpha = 0.7, color = "steelblue") +
-    geom_smooth(method = "lm", se = TRUE, color = "darkred", size = 1) +
+  nu_car <- -coef(all_results$car$ols)["travel_time_car"]
+
+  p_car <- ggplot(bin_means, aes(x = mean_tt, y = mean_flow)) +
+    geom_point(aes(size = n), alpha = 0.7, color = "forestgreen") +
+    geom_smooth(method = "lm", se = TRUE, color = "darkred", linewidth = 1) +
     labs(
-      title = "Gravity Relationship: Commuting Flows vs Travel Time",
-      subtitle = sprintf("Block Group Level | ν = %.4f | Binned scatter after partialling out FE", ols_nu),
-      x = "Residualized Travel Time (minutes)",
+      title = "Gravity Relationship: CAR Travel Time",
+      subtitle = sprintf("Block Group Level | nu = %.4f | Residualized binscatter", nu_car),
+      x = "Residualized Car Travel Time (minutes)",
       y = "Residualized Log(Commuters)",
-      size = "N obs",
-      caption = "Source: LODES 2019, r5r travel times\nNote: Both axes residualized on origin + destination FE"
-    ) +
-    theme_minimal(base_size = 12) +
-    theme(
-      plot.title = element_text(face = "bold"),
-      legend.position = "right"
-    )
-
-  ggsave("../output/gravity_binscatter_bg.pdf", p_binscatter, width = 10, height = 7)
-  message("Saved: ../output/gravity_binscatter_bg.pdf")
-
-  # Also create raw scatter (not residualized) for intuition
-  raw_bin_means <- df_positive[, .(
-    mean_travel_time = mean(travel_time_min, na.rm = TRUE),
-    mean_log_flow = mean(log_commuters, na.rm = TRUE),
-    n = .N
-  ), by = .(bin = cut(travel_time_min, breaks = 20, labels = FALSE))]
-
-  p_raw <- ggplot(raw_bin_means[!is.na(bin)], aes(x = mean_travel_time, y = mean_log_flow)) +
-    geom_point(aes(size = n), alpha = 0.7, color = "coral") +
-    geom_smooth(method = "lm", se = TRUE, color = "darkred") +
-    labs(
-      title = "Raw Gravity Relationship (No FE)",
-      subtitle = "Block Group Level | Binned means",
-      x = "Mean Travel Time (minutes)",
-      y = "Mean Log(Commuters)",
       size = "N obs"
     ) +
     theme_minimal(base_size = 12)
 
-  ggsave("../output/gravity_raw_scatter_bg.pdf", p_raw, width = 10, height = 7)
-  message("Saved: ../output/gravity_raw_scatter_bg.pdf")
+  ggsave("../output/gravity_binscatter_car_bg.pdf", p_car, width = 10, height = 7)
+  message("Saved: ../output/gravity_binscatter_car_bg.pdf")
+}
+
+# Binscatter for transit (if available)
+if (!is.null(all_results$transit$ols)) {
+  df_transit <- gravity_data[!is.na(travel_time_transit_baseline) & travel_time_transit_baseline > 0 &
+                              within_bg == FALSE & commuters > 0]
+
+  # Get residuals
+  df_transit[, resid_log_flow := residuals(all_results$transit$ols)]
+  tt_resid_transit <- feols(travel_time_transit_baseline ~ 1 | origin_bg + dest_bg, data = df_transit)
+  df_transit[, resid_tt := residuals(tt_resid_transit)]
+
+  # Binned means
+  df_transit[, bin := cut(resid_tt, breaks = 20, labels = FALSE)]
+  bin_means_transit <- df_transit[!is.na(bin), .(
+    mean_tt = mean(resid_tt, na.rm = TRUE),
+    mean_flow = mean(resid_log_flow, na.rm = TRUE),
+    n = .N
+  ), by = bin]
+
+  nu_transit <- -coef(all_results$transit$ols)["travel_time_transit_baseline"]
+
+  p_transit <- ggplot(bin_means_transit, aes(x = mean_tt, y = mean_flow)) +
+    geom_point(aes(size = n), alpha = 0.7, color = "steelblue") +
+    geom_smooth(method = "lm", se = TRUE, color = "darkred", linewidth = 1) +
+    labs(
+      title = "Gravity Relationship: TRANSIT Travel Time",
+      subtitle = sprintf("Block Group Level | nu = %.4f | Residualized binscatter", nu_transit),
+      x = "Residualized Transit Travel Time (minutes)",
+      y = "Residualized Log(Commuters)",
+      size = "N obs"
+    ) +
+    theme_minimal(base_size = 12)
+
+  ggsave("../output/gravity_binscatter_transit_bg.pdf", p_transit, width = 10, height = 7)
+  message("Saved: ../output/gravity_binscatter_transit_bg.pdf")
+}
+
+# Keep backwards compatible binscatter
+if (!is.null(all_results$transit$ols)) {
+  file.copy("../output/gravity_binscatter_transit_bg.pdf", "../output/gravity_binscatter_bg.pdf", overwrite = TRUE)
+  message("Copied: ../output/gravity_binscatter_bg.pdf (transit)")
 }
 
 # =============================================================================
@@ -326,28 +371,25 @@ if (!is.null(ols_twoway)) {
 # =============================================================================
 
 message("\n=============================================================")
-message("GRAVITY ESTIMATION SUMMARY (Block Group Level)")
+message("GRAVITY ESTIMATION SUMMARY")
 message("=============================================================")
 
-message("\n--- RESULTS ---")
+message("\n--- RESULTS BY TRAVEL TIME MEASURE ---")
 print(results[, .(specification, nu = round(nu, 4), n_obs, pct_change_per_min = round(pct_change_per_min, 2))])
 
-message("\n--- INTERPRETATION ---")
-if (!is.na(ppml_nu)) {
-  message(sprintf("PPML (preferred): 1 minute longer commute -> %.2f%% fewer commuters",
-                  abs(100 * (1 - exp(-ppml_nu)))))
-}
-if (!is.na(ols_nu)) {
-  message(sprintf("OLS (comparison): 1 minute longer commute -> %.2f%% fewer commuters",
-                  abs(100 * (1 - exp(-ols_nu)))))
+message("\n--- KEY COMPARISON ---")
+if (!is.null(all_results$transit$ols) && !is.null(all_results$car$ols)) {
+  nu_transit <- -coef(all_results$transit$ols)["travel_time_transit_baseline"]
+  nu_car <- -coef(all_results$car$ols)["travel_time_car"]
+  message(sprintf("Transit nu: %.4f", nu_transit))
+  message(sprintf("Car nu: %.4f", nu_car))
+  message(sprintf("Ratio (car/transit): %.2f", nu_car / nu_transit))
 }
 
-message("\n--- BENCHMARK COMPARISON ---")
-message("Ahlfeldt et al. (2015) Berlin: nu ~ 0.07 (per km)")
-message("Note: Our estimates are per MINUTE of travel time, not per km")
-message("To compare: if avg speed is 30 km/h, 1 km ≈ 2 min")
-message(sprintf("Our implied nu per 2 min: %.4f", 2 * ifelse(!is.na(ppml_nu), ppml_nu, ols_nu)))
+message("\n--- BENCHMARK ---")
+message("Berlin paper: nu ~ 0.035 per minute (0.07 per km at 30 km/h)")
+message("If car nu is close to 0.03-0.05, the weak transit signal is due to mode choice mismatch")
 
 message("\n=============================================================")
-message("Block Group Gravity Estimation Complete!")
+message("Gravity Estimation Complete!")
 message("=============================================================")
