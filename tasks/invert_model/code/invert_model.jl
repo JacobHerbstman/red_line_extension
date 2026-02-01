@@ -16,7 +16,7 @@ Inputs:
 - Residential floor space H_n^R
 
 Parameters:
-- ν = ε*κ (from gravity): 0.11
+- ν = ε*κ (from gravity): 0.078 (PPML travel-time converted)
 - ε (Fréchet shape): 6.83
 - (1-α) (housing share): 0.30
 
@@ -36,8 +36,10 @@ using Printf
                             PARAMETERS
 =============================================================================#
 
-# From gravity estimation (PPML two-way FE)
-const ν = 0.11  # Semi-elasticity of commuting w.r.t. distance
+# From gravity estimation (PPML travel-time, converted to distance equivalent)
+# PPML travel-time: ν_time = 0.039/min (from estimate_gravity_travel_time)
+# At 30 km/hr (0.5 km/min): ν_dist = ν_time / 0.5 ≈ 0.078/km
+const ν = 0.078  # Semi-elasticity of commuting w.r.t. distance (per km)
 
 # From Ahlfeldt et al. (2015)
 const ε = 6.83  # Fréchet shape parameter

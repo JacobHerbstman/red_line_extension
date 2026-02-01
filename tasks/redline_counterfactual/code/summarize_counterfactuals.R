@@ -15,8 +15,8 @@ library(knitr)
 cat("Loading data...\n")
 
 # Specification grid
-catchment_radii <- c(400, 800, 1200)
-kappa_reductions <- c(10, 20, 30)
+catchment_radii <- c(800)
+kappa_reductions <- c(20)
 
 # Load all welfare results
 welfare_results <- map_dfr(catchment_radii, function(r) {
@@ -37,7 +37,8 @@ main_spec <- read_csv("../output/counterfactual_r800_k20.csv", show_col_types = 
   mutate(tract = as.character(tract))  # Convert to character for joining
 
 # Load tract geometries
-tracts_sf <- st_read("../input/chicago_tracts.gpkg", quiet = TRUE)
+tracts_sf <- st_read("../input/chicago_tracts.gpkg", quiet = TRUE) %>%
+  mutate(GEOID = as.character(GEOID))
 
 # Debug: Check join compatibility
 cat("\nJoin diagnostics:\n")

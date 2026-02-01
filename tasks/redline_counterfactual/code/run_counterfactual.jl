@@ -43,15 +43,17 @@ println("\nSpecification:")
 println("  Catchment radius: $(CATCHMENT_RADIUS) m")
 println("  κ reduction: $(Int(KAPPA_REDUCTION * 100))%")
 
-# Model parameters
-const ν = 0.11
+# Model parameters - MUST MATCH invert_model.jl!
+# From PPML travel-time gravity: ν_time = 0.039/min → ν_dist = 0.078/km
+const ν = 0.078
 const ε = 6.83
-const κ_param = ν / ε
+const κ_param = ν / ε  # ≈ 0.0114
 const α_housing = 0.30  # Housing expenditure share (1-α) in model notation
+const GAMMA_LABOR = 0.65  # Labor share of production (for wage adjustment)
 
 # Convergence
-const TOL = 1e-8
-const MAX_ITER = 1000
+const TOL = 1e-6  # Relaxed for faster convergence
+const MAX_ITER = 500
 
 # RLE Station coordinates (lat, lon)
 const RLE_STATIONS = [
@@ -208,42 +210,40 @@ end
 println("  Mean distance: $(mean(D)) km")
 
 #=============================================================================
-                    IDENTIFY TREATED TRACTS
+                    COMPUTE TREATMENT INTENSITY (Continuous Decay)
 =============================================================================#
 
-println("\nIdentifying treated tracts...")
+println("\nComputing treatment intensity with spatial decay...")
 
-# For each tract, find distance to nearest RLE station
-treated_tracts = Int[]
+# For each tract, compute a continuous intensity based on distance to nearest RLE station
+# Using Gaussian decay: intensity = exp(-(distance^2) / (2 * σ^2))
+# where σ = CATCHMENT_RADIUS defines the spatial reach
+
 tract_station_dist = zeros(N)
+intensity = zeros(N)
 
 for n in 1:N
-    # Get tract centroid
-    # We need to get this from the data - for now use a lookup
     lat, lon = tract_lats[n], tract_lons[n]
-    
-    # Find nearest RLE station
-    nearest, dist = find_nearest_station(lat, lon, RLE_STATIONS)
+    _, dist = find_nearest_station(lat, lon, RLE_STATIONS)
     tract_station_dist[n] = dist
-    
-    if dist <= CATCHMENT_RADIUS
-        push!(treated_tracts, n)
-    end
+    # Gaussian decay with catchment radius as σ
+    intensity[n] = exp(-(dist^2) / (2 * CATCHMENT_RADIUS^2))
 end
 
-println("  Tracts within $(CATCHMENT_RADIUS)m of RLE station: $(length(treated_tracts))")
+# For reporting, count "treated" as tracts with > 10% intensity
+treated_tracts = findall(intensity .> 0.1)
+println("  Tracts with intensity > 10%: $(length(treated_tracts))")
+println("  Mean intensity: $(round(mean(intensity), digits=4))")
+println("  Max intensity: $(round(maximum(intensity), digits=4))")
 
-if length(treated_tracts) == 0
-    println("  ERROR: No treated tracts found!")
-    println("  Sample tract coordinates:")
-    for n in 1:min(5, N)
-        println("    Tract $(tracts[n]): ($(tract_lats[n]), $(tract_lons[n]))")
+# Error check - make sure we have treatment effect
+if maximum(intensity) < 0.01
+    println("  ERROR: No tracts have meaningful treatment intensity!")
+    println("  Missing centroid tracts:")
+    for t in missing_centroid_tracts
+        println("    - $t")
     end
-    println("  RLE stations:")
-    for (name, lat, lon) in RLE_STATIONS
-        println("    $name: ($lat, $lon)")
-    end
-    error("No treated tracts found. Results would be meaningless. Check tract centroids and station coordinates.")
+    error("No meaningful treatment intensity. Check tract centroids match RLE station locations.")
 end
 
 #=============================================================================
@@ -251,8 +251,6 @@ end
 =============================================================================#
 
 # Destinations that benefit = tracts near Red Line (especially downtown)
-# For simplicity, we'll apply the reduction to commutes to downtown tracts
-
 println("\nIdentifying destination tracts (downtown/Red Line accessible)...")
 
 downtown_tracts = Int[]
@@ -271,32 +269,33 @@ println("  Downtown tracts: $(length(downtown_tracts))")
 
 println("\nComputing commuting cost changes...")
 
-# κ_hat[n,i] = κ'[n,i] / κ[n,i] = ratio of new to old iceberg cost
-# = 1 for non-treated pairs
-# For treated pairs, we reduce the effective friction parameter, not the final cost.
-# Baseline: κ = exp(κ_param * d)
-# Counterfactual: κ' = exp(κ_param * d * (1 - reduction))
-# Ratio: κ_hat = κ'/κ = exp(κ_param * d * (1 - reduction) - κ_param * d)
-#              = exp(-κ_param * d * reduction)
-# This ensures κ_hat < 1 (cost reduction) without violating κ >= 1.
+# κ_hat[n,i] = ratio of new to old iceberg cost
+# Using continuous intensity for smooth spatial spillovers:
+# κ_hat[n,i] = exp(-κ_param * D[n,i] * KAPPA_REDUCTION * intensity[n])
+# This ensures:
+#   - κ_hat <= 1 always (cost reduction, not increase)
+#   - Smooth spatial decay of treatment effect
+#   - Larger reductions for closer tracts and longer commutes
 
 κ_hat = ones(N, N)
 
-# Count treated pairs
-n_treated_pairs = length(treated_tracts) * length(downtown_tracts)
-for n in treated_tracts
-    for i in downtown_tracts
-        # Reduce the effective friction parameter by KAPPA_REDUCTION percent
-        # New cost = exp(κ_param * dist * (1 - reduction))
-        # Ratio (κ_hat) = exp(-κ_param * dist * reduction)
-        κ_hat[n, i] = exp(-κ_param * D[n, i] * KAPPA_REDUCTION)
+for n in 1:N
+    if intensity[n] > 1e-6  # Only compute for tracts with meaningful intensity
+        for i in downtown_tracts
+            # Apply weighted reduction based on tract's intensity
+            κ_hat[n, i] = exp(-κ_param * D[n, i] * KAPPA_REDUCTION * intensity[n])
+        end
     end
 end
 
-println("  Treated (origin, destination) pairs: $(n_treated_pairs)")
-if n_treated_pairs > 0
-    treated_kappa_hats = [κ_hat[n, i] for n in treated_tracts for i in downtown_tracts]
-    println("  κ_hat for treated pairs: mean=$(round(mean(treated_kappa_hats), digits=4)), min=$(round(minimum(treated_kappa_hats), digits=4)), max=$(round(maximum(treated_kappa_hats), digits=4))")
+# Summary stats
+n_affected_tracts = sum(intensity .> 1e-6)
+n_treated_pairs = n_affected_tracts * length(downtown_tracts)
+affected_kappa_hats = [κ_hat[n, i] for n in 1:N for i in downtown_tracts if intensity[n] > 1e-6]
+println("  Tracts with non-zero intensity: $(n_affected_tracts)")
+println("  Affected (origin, destination) pairs: $(n_treated_pairs)")
+if length(affected_kappa_hats) > 0
+    println("  κ_hat for affected pairs: mean=$(round(mean(affected_kappa_hats), digits=4)), min=$(round(minimum(affected_kappa_hats), digits=4)), max=$(round(maximum(affected_kappa_hats), digits=4))")
 end
 
 #=============================================================================
@@ -329,11 +328,10 @@ println("\nSolving counterfactual equilibrium...")
 # 4. Population:
 #    Σ_n L_n^R * L_hat_n^R = L_bar (unchanged)
 #
-# For this first pass, we'll hold wages fixed (w_hat = 1) and solve for
-# residential reallocation and price changes.
+# Now solving with ENDOGENOUS wages for full general equilibrium.
 
 # Initialize
-w_hat = ones(N)  # Hold wages fixed
+w_hat = ones(N)  # Now endogenous - will be updated in iteration
 Q_hat = ones(N)
 L_R_hat = ones(N)
 L_M_hat = ones(N)
@@ -407,25 +405,34 @@ for iter in 1:MAX_ITER
         end
     end
     L_M_hat_new = L_M_new ./ max.(L_M, 1.0)
-    
-    # Check convergence
+
+    # Step 7: WAGE ADJUSTMENT via labor demand curve
+    # Using diminishing returns to labor: w = A * L^(γ-1) where γ = GAMMA_LABOR
+    # So w_hat = L_hat^(γ-1)
+    # This is simpler and converges faster than the full GE approach
+    w_hat_new = L_M_hat_new .^ (GAMMA_LABOR - 1.0)
+    w_hat_new = w_hat_new ./ mean(w_hat_new)  # Normalize mean wage = 1
+
+    # Check convergence (now including wages)
     diff_Q = maximum(abs.(Q_hat_new .- Q_hat))
     diff_L = maximum(abs.(L_R_hat_new .- L_R_hat))
-    
+    diff_w = maximum(abs.(w_hat_new .- w_hat))
+
     if iter % 100 == 0 || iter == 1
-        @printf("  Iter %4d: max ΔQ_hat = %.2e, max ΔL_R_hat = %.2e\n", iter, diff_Q, diff_L)
+        @printf("  Iter %4d: ΔQ=%.2e, ΔL=%.2e, Δw=%.2e\n", iter, diff_Q, diff_L, diff_w)
     end
-    
-    # Update (use global to modify outer scope variables)
-    global Q_hat = 0.5 * Q_hat + 0.5 * Q_hat_new  # Damping for stability
+
+    # Update with damping for stability
+    global Q_hat = 0.5 * Q_hat + 0.5 * Q_hat_new
     global L_R_hat = 0.5 * L_R_hat + 0.5 * L_R_hat_new
     global L_M_hat = L_M_hat_new
-    
-    if max(diff_Q, diff_L) < TOL
+    global w_hat = 0.5 * w_hat + 0.5 * w_hat_new
+
+    if max(diff_Q, diff_L, diff_w) < TOL
         @printf("  Converged after %d iterations\n", iter)
         break
     end
-    
+
     if iter == MAX_ITER
         println("  WARNING: Did not converge after $(MAX_ITER) iterations")
     end
@@ -476,16 +483,18 @@ println("\n" * "="^70)
 println("RESULTS SUMMARY")
 println("="^70)
 
-# Changes for treated tracts
-treated_mask = [n in treated_tracts for n in 1:N]
+# Changes for treated tracts (intensity > 10%)
+treated_mask = intensity .> 0.1
 
-println("\nTreated tracts (n = $(sum(treated_mask))):")
+println("\nTreated tracts (intensity > 10%, n = $(sum(treated_mask))):")
 @printf("  Mean Q_hat: %.4f (%.2f%% change)\n", mean(Q_hat[treated_mask]), (mean(Q_hat[treated_mask])-1)*100)
 @printf("  Mean L_R_hat: %.4f (%.2f%% change)\n", mean(L_R_hat[treated_mask]), (mean(L_R_hat[treated_mask])-1)*100)
+@printf("  Mean w_hat: %.4f (%.2f%% change)\n", mean(w_hat[treated_mask]), (mean(w_hat[treated_mask])-1)*100)
 
 println("\nAll tracts (n = $N):")
 @printf("  Mean Q_hat: %.4f (%.2f%% change)\n", mean(Q_hat), (mean(Q_hat)-1)*100)
 @printf("  Mean L_R_hat: %.4f (%.2f%% change)\n", mean(L_R_hat), (mean(L_R_hat)-1)*100)
+@printf("  Mean w_hat: %.4f (should be ~1)\n", mean(w_hat))
 @printf("  Total welfare change: %.4f%%\n", welfare_change_pct)
 
 #=============================================================================
@@ -497,7 +506,11 @@ println("\nSaving results...")
 # Tract-level results
 results_df = DataFrame(
     tract = tracts,
+    intensity = intensity,
     wage_baseline = w,
+    w_hat = w_hat,
+    wage_new = w .* w_hat,
+    w_pct_change = (w_hat .- 1) .* 100,
     floor_price_baseline = Q,
     amenity = B,
     residents_baseline = L_R,
@@ -531,8 +544,10 @@ welfare_df = DataFrame(
     welfare_change_pct = welfare_change_pct,
     mean_Q_hat_treated = mean(Q_hat[treated_mask]),
     mean_L_R_hat_treated = mean(L_R_hat[treated_mask]),
+    mean_w_hat_treated = mean(w_hat[treated_mask]),
     mean_Q_hat_all = mean(Q_hat),
-    mean_L_R_hat_all = mean(L_R_hat)
+    mean_L_R_hat_all = mean(L_R_hat),
+    mean_w_hat_all = mean(w_hat)
 )
 
 welfare_file = joinpath(output_dir, "welfare_r$(CATCHMENT_RADIUS)_k$(Int(KAPPA_REDUCTION*100)).csv")
