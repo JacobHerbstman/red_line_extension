@@ -1,0 +1,81 @@
+% ======================================================================
+%  Data and Estimation
+% ======================================================================
+
+\section{Data and Estimation}\label{sec:data}
+
+\subsection{Data Sources}
+
+I use several data sources:
+
+\paragraph{Commuting flows.} Bilateral commuting flows come from the LODES (LEHD Origin-Destination Employment Statistics) data. This gives workplace-residence pairs at the census block level, which I aggregate to tracts. I use the 2019 vintage to avoid pandemic distortions.
+
+\paragraph{Travel times.} I compute transit travel times between tract centroids using the \texttt{r5r} package, which routes trips on the actual CTA network using GTFS schedule data. I assume a Wednesday 8am departure to capture typical commuting conditions. For the counterfactual, I create a modified GTFS file that adds the four new Red Line stations with realistic stop times.
+
+\paragraph{Housing supply.} Residential floor space by tract comes from Cook County Assessor data. I aggregate building square footage for residential properties to the tract level.
+
+\paragraph{Geography.} Census tract boundaries come from the Census Bureau's TIGER files (2010 vintage to match LODES).
+
+\subsection{Sample Construction}
+
+I focus on census tracts within Chicago. I drop tracts with very little residential floor space (under 100,000 sq ft) since these are mostly commercial/industrial areas where the residential choice model doesn't make sense. This leaves 786 tracts.
+
+\subsection{Estimation of $\nu$}
+
+The gravity equation for commuting is:
+\begin{equation}
+\mathbb{E}[F_{ni}] = \exp(\theta_n + \zeta_i - \nu \tau_{ni})
+\end{equation}
+where $F_{ni}$ is the flow from residence $n$ to workplace $i$, $\theta_n$ and $\zeta_i$ are origin and destination fixed effects, and $\tau_{ni}$ is travel time in minutes.
+
+I estimate this by PPML (Poisson pseudo-maximum likelihood) with two-way fixed effects, following \cite{santos_silva_log_2006}. PPML handles zeros well and is consistent under heteroskedasticity.
+
+Table~\ref{tab:gravity} shows the results. The main estimate is $\hat{\nu} = 0.039$, meaning an additional minute of commute time reduces the flow by about 3.8\%. This is somewhat lower than the estimates from \cite{ahlfeldt_economics_2015}, who find around 0.07 per minute for Berlin. The difference likely reflects that Chicago has more automobile commuting than Berlin, so transit times matter less on the margin.
+
+\begin{table}[h]
+\centering
+\caption{Gravity Estimation Results}
+\label{tab:gravity}
+\begin{tabular}{lcc}
+\hline
+& PPML & OLS \\
+\hline
+Travel time (min) & $-0.039$ & $-0.016$ \\
+& $(0.0005)$ & $(0.0004)$ \\
+\hline
+Origin FE & Yes & Yes \\
+Destination FE & Yes & Yes \\
+Observations & 481,801 & 127,912 \\
+\hline
+\multicolumn{3}{l}{\footnotesize Standard errors in parentheses.} \\
+\multicolumn{3}{l}{\footnotesize OLS uses only positive flows with log transformation.}
+\end{tabular}
+\end{table}
+
+Figure~\ref{fig:gravity_binscatter} shows the residualized binned relationship between log commuting flows and travel time. The relationship is close to linear and clearly downward sloping, consistent with the PPML estimate.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/gravity_binscatter_residualized.pdf}
+\caption{Residualized gravity binscatter: log commuting flows vs. transit travel time. Both variables are residualized on origin and destination fixed effects.}
+\label{fig:gravity_binscatter}
+\end{figure}
+
+The OLS estimate (on log flows, positive flows only) is smaller at 0.016. This is expected---OLS with log transformation gives inconsistent estimates under heteroskedasticity and drops zeros, which can bias the coefficient toward zero. PPML is preferred.
+
+\subsection{Calibrated Parameters}
+
+I set the following parameters based on the literature:
+\begin{itemize}
+\item $\varepsilon = 6.83$: Fr\'{e}chet shape parameter, from \cite{ahlfeldt_economics_2015}
+\item $1-\alpha = 0.30$: Housing expenditure share
+\item $\gamma = 0.65$: Labor share in production
+\end{itemize}
+
+\subsection{Model Inversion}
+
+With $\nu$ estimated and other parameters calibrated, I invert the model to recover fundamentals for all 786 tracts. The inversion proceeds in steps as described in Section~\ref{sec:model}. The key step is recovering wages: I iterate on the labor market clearing condition until predicted employment matches observed employment. Then floor prices and amenities follow from the other equilibrium conditions.
+
+The model fits the data well---the correlation between observed and model-predicted residents/workers is essentially 1.0 by construction (the inversion is designed to match these moments exactly).
+
+The recovered wages range from about 0.4 to 2.5 times the mean (normalized to 1). Higher-wage tracts are concentrated in and around the Loop, which makes sense given that's where most high-paying jobs are located. Amenities vary more widely, with high values along the lakefront and in popular North Side neighborhoods.

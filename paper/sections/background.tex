@@ -1,0 +1,37 @@
+% ======================================================================
+%  Background and Diagnostic
+% ======================================================================
+
+\section{Background}\label{sec:background}
+
+\subsection{The Red Line Extension}
+
+The CTA Red Line runs north-south through Chicago, currently ending at 95th/Dan Ryan on the South Side. Communities further south---Roseland, Pullman, West Pullman, Riverdale---don't have direct rail access to downtown, even though residents there often have some of the longest commute times in the city.
+
+The proposed Red Line Extension would add about 5.6 miles of track and four new stations:
+\begin{itemize}
+    \item 103rd Street
+    \item 111th Street  
+    \item Michigan Avenue (near 116th Street)
+    \item 130th Street (the new terminal)
+\end{itemize}
+
+This project has been in planning for a long time. The CTA estimates it would serve around 30,000 riders per day and give Far South Side residents a one-seat ride to the Loop.
+
+\subsection{Why Use a Spatial Model?}
+
+You could try to evaluate this project with a simple cost-benefit analysis: count how many people would ride, multiply by their time savings, and you're done. But this misses a lot.
+
+First, better transit changes where people want to live. If it's suddenly easier to get downtown from Roseland, some people might move there. Others might move away from expensive neighborhoods closer to downtown now that they can live cheaper further out and still have a reasonable commute. 
+
+Second, these location changes affect prices. More demand for housing near the new stations means higher rents and property values there. This is good for existing homeowners but could price out renters.
+
+Third, if lots of workers start commuting to the same places, wages might adjust. More labor supply to downtown could put downward pressure on wages there.
+
+A quantitative spatial model captures all these effects together. Workers optimize over all their options, prices adjust until markets clear, and I can trace through what happens when travel times change.
+
+\subsection{Related Literature}
+
+The model I use comes from \cite{ahlfeldt_economics_2015} and \cite{monte_commuting_2018}. Ahlfeldt et al.\ study Berlin and use the division/reunification to identify agglomeration forces. They also do counterfactuals about what Berlin would look like without cars. Monte et al.\ look at commuting across U.S.\ counties and show that commuting linkages matter a lot for how local labor markets respond to shocks.
+
+My application is closest to the transport counterfactuals in the Berlin paper, except I'm looking at a prospective policy (adding transit) rather than a retrospective one (removing cars).

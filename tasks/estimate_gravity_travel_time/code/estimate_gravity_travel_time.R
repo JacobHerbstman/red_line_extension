@@ -307,6 +307,10 @@ p1 <- ggplot(binned, aes(x = mean_x, y = mean_y)) +
   theme_minimal(base_size = 12)
 print(p1)
 
+# Save the key gravity figure as a standalone file for paper inclusion
+ggsave("../output/gravity_binscatter_residualized.pdf", p1, width = 10, height = 7)
+message("Saved: ../output/gravity_binscatter_residualized.pdf")
+
 # ---------------------------------------------------------------------------
 # Plot 2: Coefficient comparison
 # ---------------------------------------------------------------------------

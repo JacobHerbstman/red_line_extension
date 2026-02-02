@@ -1,23 +1,42 @@
 \documentclass[11pt]{article}
 
-% ---------- minimal packages ----------
+% ---------- packages ----------
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath, amssymb}
 \usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{float}
 
 % ---------- bibliography ----------
 \usepackage[authoryear]{natbib}
 \bibliographystyle{apalike}
 
-\title{Spatial Economics HW1: Red Line Extension Welfare Analysis}
+\title{Welfare Effects of the Chicago Red Line Extension: \\
+A Quantitative Spatial Analysis}
 \author{Jacob Herbstman}
 \date{\today}
 
 \begin{document}
 \maketitle
 
-% ---- include the model section file (put your model text in model.tex) ----
+% ---- Abstract and Introduction ----
+\input{sections/introduction.tex}
+
+% ---- Background ----
+\input{sections/background.tex}
+
+% ---- Model ----
 \input{sections/model.tex}
+
+% ---- Data and Estimation ----
+\input{sections/data.tex}
+
+% ---- Counterfactual Results ----
+\input{sections/counterfactual.tex}
+
+% ---- Conclusion ----
+\input{sections/conclusion.tex}
 
 \clearpage
 
