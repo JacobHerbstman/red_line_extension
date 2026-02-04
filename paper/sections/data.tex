@@ -6,13 +6,13 @@
 
 \subsection{Data Sources}
 
-I use several data sources:
+I use several data sources to calibrate the model and perform counterfactuals.
 
-\paragraph{Commuting flows.} Bilateral commuting flows come from the LODES (LEHD Origin-Destination Employment Statistics) data. This gives workplace-residence pairs at the census block level, which I aggregate to tracts. I use the 2019 vintage to avoid pandemic distortions.
+\paragraph{Commuting flows.} Bilateral commuting flows come from the LODES (LEHD Origin-Destination Employment Statistics) data. This gives workplace-residence pairs at the census block level, which I aggregate to tracts. I use the 2019 vintage to avoid pandemic distortions in commuting flows.
 
 \paragraph{Travel times.} I compute transit travel times between tract centroids using the \texttt{r5r} package, which routes trips on the actual CTA network using GTFS schedule data. I assume a Wednesday 8am departure to capture typical commuting conditions. For the counterfactual, I create a modified GTFS file that adds the four new Red Line stations with realistic stop times.
 
-\paragraph{Housing supply.} Residential floor space by tract comes from Cook County Assessor data. I aggregate building square footage for residential properties to the tract level.
+\paragraph{Housing supply.} Residential floor space by tract comes from Cook County Assessor data, from which I combine residential improvements data and commercial valuation data to get a residential share of floorspace in each census tract.
 
 \paragraph{Geography.} Census tract boundaries come from the Census Bureau's TIGER files (2010 vintage to match LODES).
 
@@ -28,9 +28,9 @@ The gravity equation for commuting is:
 \end{equation}
 where $F_{ni}$ is the flow from residence $n$ to workplace $i$, $\theta_n$ and $\zeta_i$ are origin and destination fixed effects, and $\tau_{ni}$ is travel time in minutes.
 
-I estimate this by PPML (Poisson pseudo-maximum likelihood) with two-way fixed effects, following \cite{santos_silva_log_2006}. PPML handles zeros well and is consistent under heteroskedasticity.
+I estimate this by PPML (Poisson pseudo-maximum likelihood) with two-way fixed effects, following \cite{silva_log_2006}. PPML handles zeros well and is consistent under heteroskedasticity, which is crucial in this setting since many tract pairs have zero flows.
 
-Table~\ref{tab:gravity} shows the results. The main estimate is $\hat{\nu} = 0.039$, meaning an additional minute of commute time reduces the flow by about 3.8\%. This is somewhat lower than the estimates from \cite{ahlfeldt_economics_2015}, who find around 0.07 per minute for Berlin. The difference likely reflects that Chicago has more automobile commuting than Berlin, so transit times matter less on the margin.
+Table~\ref{tab:gravity} shows the results. The main estimate is $\hat{\nu} = 0.039$, meaning an additional minute of commute time reduces the flow by about 3.9\%. This is somewhat lower than the estimates from \cite{ahlfeldt_economics_2015}, who find around 0.07 per minute for Berlin. The difference likely reflects that Chicago has more automobile commuting than Berlin which changes the mix of commuters using transit. Transit commuters in the US are likely less sensitive to travel time than in a city where transit is the dominant mode.
 
 \begin{table}[h]
 \centering
@@ -61,7 +61,7 @@ Figure~\ref{fig:gravity_binscatter} shows the residualized binned relationship b
 \label{fig:gravity_binscatter}
 \end{figure}
 
-The OLS estimate (on log flows, positive flows only) is smaller at 0.016. This is expected---OLS with log transformation gives inconsistent estimates under heteroskedasticity and drops zeros, which can bias the coefficient toward zero. PPML is preferred.
+The OLS estimate (on log flows, positive flows only) is smaller at 0.016. As a result, my preferred specification is PPML, which uses all the data and is more robust.
 
 \subsection{Calibrated Parameters}
 
@@ -76,6 +76,36 @@ I set the following parameters based on the literature:
 
 With $\nu$ estimated and other parameters calibrated, I invert the model to recover fundamentals for all 786 tracts. The inversion proceeds in steps as described in Section~\ref{sec:model}. The key step is recovering wages: I iterate on the labor market clearing condition until predicted employment matches observed employment. Then floor prices and amenities follow from the other equilibrium conditions.
 
-The model fits the data well---the correlation between observed and model-predicted residents/workers is essentially 1.0 by construction (the inversion is designed to match these moments exactly).
+The model fits the data exactly, as it is designed to do. 
 
-The recovered wages range from about 0.4 to 2.5 times the mean (normalized to 1). Higher-wage tracts are concentrated in and around the Loop, which makes sense given that's where most high-paying jobs are located. Amenities vary more widely, with high values along the lakefront and in popular North Side neighborhoods.
+The recovered wages range from about 0.4 to 2.5 times the mean (normalized to 1). Higher-wage tracts are concentrated in and around the Loop, which makes sense given that's where most high-paying jobs are located. Amenities vary more widely, with high values along the lakefront and in popular North Side neighborhoods. Since there is no heterogeneity in worker skills in this model, all differences in floor prices and population densities come from amenities and commuting access.
+
+Figure~\ref{fig:baseline_maps} shows maps of the key baseline fundamentals. The spatial patterns are intuitive: high wages downtown, high floor prices along the lake, and amenities concentrated in desirable neighborhoods.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figures/baseline_fundamentals_maps.pdf}
+\caption{Baseline fundamentals from model inversion: wages, floor prices, amenities, and commuting market access by census tract.}
+\label{fig:baseline_maps}
+\end{figure}
+
+\subsection{Baseline Fundamentals}
+
+Table~\ref{tab:baseline} summarizes the distribution of key fundamentals across Chicago's 786 tracts.
+
+\begin{table}[h]
+\centering
+\caption{Baseline Fundamentals (Model Inversion)}
+\label{tab:baseline}
+\begin{tabular}{lccccc}
+\hline
+Variable & Mean & Median & SD & Min & Max \\
+\hline
+Wage ($w_i$) & 1.00 & 0.97 & 0.22 & 0.41 & 2.47 \\
+Floor Price ($Q_n$) & 1.07 & 1.00 & 0.47 & 0.44 & 6.42 \\
+Amenity ($B_n$) & 1.75 & 1.01 & 2.88 & 0.06 & 40.77 \\
+Commuting Access ($\widetilde{W}_n$) & 327 & 306 & 143 & 83 & 982 \\
+\hline
+\end{tabular}
+\end{table}
+

@@ -4,11 +4,12 @@
 
 \section{Model}\label{sec:model}
 
-I use a quantitative spatial model based on \cite{monte_commuting_2018} and \cite{ahlfeldt_economics_2015}. The key idea is that workers choose both where to live and where to work, and markets clear. I simplify by ignoring goods trade across locations---the focus is on commuting, which is what a transit investment affects most directly.
+I use a quantitative spatial model based on \cite{monte_commuting_2018} and \cite{ahlfeldt_economics_2015}. The key idea is that workers choose both where to live and where to work, and markets clear. I simplify by ignoring goods trade across locations due to both a lack of data and a lack of meaningful trade costs within the city. 
+I focus on commuting costs as the key friction that the transit extension affects.
 
 \subsection{Setup}
 
-There are $N$ locations (census tracts in Chicago). Workers choose a residence $n$ and a workplace $i$. Each location has a fixed housing supply $H_n^R$ with price $Q_n$. There's a consumption good that's freely traded and serves as numeraire.
+There are $N$ locations, which I will calibrate to census tracts in Chicago. Workers choose a residence $n$ and a workplace $i$. Each location has a fixed housing supply $H_n^R$ with price $Q_n$. There's a consumption good that's freely traded and serves as numeraire.
 
 \subsection{Preferences}
 
@@ -16,15 +17,14 @@ Workers have Cobb-Douglas preferences over consumption and housing:
 \begin{equation}
 U_{ni\omega} = \frac{b_{ni\omega} \cdot B_n}{\kappa_{ni}} \left(\frac{c}{\alpha}\right)^\alpha \left(\frac{h}{1-\alpha}\right)^{1-\alpha}
 \end{equation}
-Here $B_n$ is a residential amenity, $\kappa_{ni} \geq 1$ is a commuting cost from $n$ to $i$, and $b_{ni\omega}$ is an idiosyncratic taste shock. The key assumption is that these taste shocks follow a Fr\'{e}chet distribution with shape $\varepsilon > 1$. This makes the math work out nicely.
+Here $B_n$ is a residential amenity, $\kappa_{ni} \geq 1$ is a commuting cost from $n$ to $i$, and $b_{ni\omega}$ is an idiosyncratic taste shock. The key assumption is that these taste shocks follow a Fr\'{e}chet distribution with shape $\varepsilon > 1$, as usual.
 
 A worker in $n$ earning wage $w_i$ at workplace $i$ has indirect utility:
 \begin{equation}
 V_{ni\omega} = b_{ni\omega} \cdot \frac{B_n \cdot w_i}{\kappa_{ni} \cdot Q_n^{1-\alpha}}
 \end{equation}
 So utility goes up with wages and amenities, and down with commuting costs and housing prices.
-I treat $\kappa_{ni}$ as a non-monetary commuting disutility (an iceberg wedge in utility and choice probabilities), not a direct cash deduction from wages in the budget.
-
+$\kappa_{ni}$ is an iceberg commuting cost between locations $n$ and $i$.
 \subsection{Commuting Costs}
 
 I assume commuting costs are exponential in travel time:
@@ -55,7 +55,7 @@ Each workplace produces using labor with diminishing returns: $Y_i = A_i (L_i^M)
 \begin{equation}
 w_i = \gamma A_i (L_i^M)^{\gamma-1}
 \end{equation}
-When $\gamma < 1$, wages fall if more workers show up.
+When $\gamma < 1$, wages fall if more workers enter the location, allowing a congestion force to pin down a stable equilibrium.
 
 \subsection{Market Clearing}
 
@@ -68,17 +68,17 @@ Expected utility before taste shocks realize is $\bar{U} = \Gamma((\varepsilon-1
 \subsection{Inversion: Recovering Fundamentals}
 
 To do counterfactuals, I need to know the model's fundamentals. I recover these from data as follows:
-\begin{enumerate}
-\item \textbf{Estimate $\nu$} from a gravity regression of commuting flows on travel times with origin and destination fixed effects.
-\item \textbf{Recover wages} by finding $\{w_i\}$ that make the model's predicted employment match observed employment, given commuting costs.
-\item \textbf{Recover floor prices} from land market clearing: $Q_n = (1-\alpha) \bar{w}_n L_n^R / H_n^R$.
-\item \textbf{Recover amenities} from residential shares: $B_n^\varepsilon \propto \lambda_n^R Q_n^{(1-\alpha)\varepsilon} / \widetilde{W}_n$.
-\item \textbf{Recover productivity} from the wage equation: $A_i = w_i / (\gamma (L_i^M)^{\gamma-1})$.
-\end{enumerate}
+\begin{itemize}
+\item Estimate $\nu$ from a gravity regression of commuting flows on travel times with origin and destination fixed effects.
+\item Recover wages by finding $\{w_i\}$ that make the model's predicted employment match observed employment, given commuting costs.
+\item Recover floor prices from land market clearing: $Q_n = (1-\alpha) \bar{w}_n L_n^R / H_n^R$.
+\item Recover amenities from residential shares: $B_n^\varepsilon \propto \lambda_n^R Q_n^{(1-\alpha)\varepsilon} / \widetilde{W}_n$.
+\item Recover productivity from the wage equation: $A_i = w_i / (\gamma (L_i^M)^{\gamma-1})$.
+\end{itemize}
 
 \subsection{Counterfactual: Solving in Changes}
 
-For the counterfactual, I use ``exact hat algebra'' following \cite{dekle_global_2007}. Let hats denote ratios: $\hat{x} = x'/x$ where primes are counterfactual values. Given changes in commuting costs $\hat{\kappa}_{ni}^{-\varepsilon} = \exp(-\nu(\tau'_{ni} - \tau_{ni}))$, I solve for changes in all endogenous variables.
+For the counterfactual, I use exact hat algebra following \cite{dekle_unbalanced_2007,dekle_global_2008}. Let hats denote ratios: $\hat{x} = x'/x$ where primes are counterfactual values. Given changes in commuting costs $\hat{\kappa}_{ni}^{-\varepsilon} = \exp(-\nu(\tau'_{ni} - \tau_{ni}))$, I solve for changes in all endogenous variables.
 
 The key equations in changes are:
 \begin{align}

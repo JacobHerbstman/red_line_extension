@@ -4,45 +4,12 @@
 
 \section{Counterfactual: Red Line Extension}\label{sec:counterfactual}
 
-\subsection{Baseline Fundamentals}
-
-Before running the counterfactual, it's useful to summarize the baseline fundamentals recovered from the model inversion. These describe the initial equilibrium before the transit expansion.
-
-Table~\ref{tab:baseline} summarizes the distribution of key fundamentals across Chicago's 786 tracts.
-
-\begin{table}[h]
-\centering
-\caption{Baseline Fundamentals (Model Inversion)}
-\label{tab:baseline}
-\begin{tabular}{lccccc}
-\hline
-Variable & Mean & Median & SD & Min & Max \\
-\hline
-Wage ($w_i$) & 1.00 & 0.97 & 0.22 & 0.41 & 2.47 \\
-Floor Price ($Q_n$) & 1.07 & 1.00 & 0.47 & 0.44 & 6.42 \\
-Amenity ($B_n$) & 1.75 & 1.01 & 2.88 & 0.06 & 40.77 \\
-Commuting Access ($\widetilde{W}_n$) & 327 & 306 & 143 & 83 & 982 \\
-\hline
-\end{tabular}
-\end{table}
-
-Wages are highest in the Loop and surrounding business districts, declining as you move to the periphery. Floor prices are highest along the lakefront and in the North Side. Amenities show the widest variation---some tracts have very high amenities (lakefront, parks) while others are quite low.
-
-Figure~\ref{fig:baseline_maps} shows maps of the key baseline fundamentals. The spatial patterns are intuitive: high wages downtown, high floor prices along the lake, and amenities concentrated in desirable neighborhoods.
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=\textwidth]{figures/baseline_fundamentals_maps.pdf}
-\caption{Baseline fundamentals from model inversion: wages, floor prices, amenities, and commuting market access by census tract.}
-\label{fig:baseline_maps}
-\end{figure}
-
 \subsection{Counterfactual Setup}
 
 To evaluate the Red Line Extension, I compute travel times under two scenarios:
 \begin{enumerate}
-\item \textbf{Baseline}: Current CTA network (Red Line ends at 95th Street)
-\item \textbf{Extension}: CTA network with four new stations at 103rd, 111th, Michigan/116th, and 130th
+\item Baseline: Current CTA network (Red Line ends at 95th Street)
+\item Extension: CTA network with four new stations at 103rd, 111th, Michigan/116th, and 130th
 \end{enumerate}
 
 I modify the GTFS schedule to add the new stations with realistic travel times between stops, then use \texttt{r5r} to compute the full origin-destination travel time matrix under each scenario.
@@ -83,7 +50,7 @@ Improved OD pairs & \multicolumn{2}{c}{13,800} \\
 \end{tabular}
 \end{table}
 
-\paragraph{Welfare.} The aggregate welfare gain is about 0.067\%. This is modest but meaningful given the localized nature of the intervention. For context, \cite{monte_commuting_2018} find that observed reductions in commuting costs across all U.S.\ counties generate welfare gains of around 3.3\%---much larger because their counterfactual affects the entire country.
+\paragraph{Welfare.} The aggregate welfare gain is about 0.067\%. This is modest in the aggregate, but meaningful for the areas it affects directly. For context, \cite{monte_commuting_2018} find that observed reductions in commuting costs across all U.S.\ counties generate welfare gains of around 3.3\%---much larger because their counterfactual affects the entire country and are likely much better targeted.
 
 \paragraph{Housing prices.} Treated tracts see floor prices rise by about 6.4\% on average. This reflects increased demand for housing in these areas as commuting downtown becomes easier. For non-treated tracts, the effects are negligible.
 
@@ -102,16 +69,4 @@ Improved OD pairs & \multicolumn{2}{c}{13,800} \\
 
 The results tell a coherent story. The Red Line Extension improves job access for Far South Side residents, making these neighborhoods more attractive places to live. This pulls in more residents, which bids up housing prices. The welfare gains come from two sources: (1) direct utility gains from shorter commutes, and (2) improved matching between workers and jobs as some commutes become feasible that weren't before.
 
-The 0.067\% aggregate welfare gain is small partly because only about 3\% of Chicago's tracts (24 out of 786) are directly treated. But residents of those tracts gain substantially---their housing prices rise by over 6\%, reflecting the capitalized value of better transit access.
-
-\subsection{Caveats}
-
-Several caveats are worth noting:
-
-\begin{itemize}
-\item I assume fundamentals (amenities, productivity) don't change. In reality, better transit might attract businesses or amenities to the corridor.
-\item The model is static. I compare two steady states without modeling the transition dynamics.
-\item I only consider transit commuting. Some Far South Side residents currently drive; they would see smaller benefits.
-\item The welfare measure is average utility. It doesn't capture distributional effects---existing homeowners near new stations gain from rising property values, while renters may be squeezed.
-\item I abstract from construction costs. A full cost-benefit analysis would need to weigh these benefits against the capital and operating costs of the extension.
-\end{itemize}
+The 0.067\% aggregate welfare gain is small partly because only about 3\% of Chicago's tracts (24 out of 786) are directly treated. But residents of those tracts gain substantially. Their housing prices rise by over 6\%, reflecting the capitalized value of better transit access.
