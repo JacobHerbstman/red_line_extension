@@ -1,6 +1,7 @@
 # Red Line Extension Welfare Analysis
 
-Estimates the welfare effects of the proposed CTA Red Line Extension on Chicago's South Side using a quantitative spatial model (simplified Monte et al. 2018).
+Estimates the welfare effects of the proposed CTA Red Line Extension on Chicago's South Side using a quantitative spatial model, 
+specifically a simplified version of Monte et al. 2018.
 
 ## Running
 
@@ -40,6 +41,20 @@ make
 You'll need a Census API key for tract data:
 ```r
 tidycensus::census_api_key("YOUR_KEY", install = TRUE)
+```
+
+For travel-time tasks (`r5r`), you also need Java 11+ available to R.
+
+Quick check:
+```bash
+java -version
+Rscript -e 'cat("JAVA_HOME=", Sys.getenv("JAVA_HOME"), "\n"); cat("rJava=", requireNamespace("rJava", quietly=TRUE), "\n"); cat("r5r=", requireNamespace("r5r", quietly=TRUE), "\n")'
+```
+
+If Java is installed but R cannot find it, set `JAVA_HOME` before running `make`.
+macOS example:
+```bash
+export JAVA_HOME=$(/usr/libexec/java_home -v 11)
 ```
 
 ## Structure
