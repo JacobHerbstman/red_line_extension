@@ -1,13 +1,11 @@
-# Red Line Extension counterfactual with exact hat algebra and endogenous wages.
+# Red Line Extension counterfactual (exact hat algebra, endogenous wages)
 
 using CSV
 using DataFrames
 using Statistics
 using Printf
 
-#=============================================================================
-                            PARAMETERS
-=============================================================================#
+# ---- Parameters ----
 
 # Read command line arguments
 if length(ARGS) < 2
@@ -49,12 +47,9 @@ const RLE_STATIONS = [
 
 const MIN_TRAVEL_TIME = 5.0       # minutes for within-tract minimum
 
-#=============================================================================
-                            HELPER FUNCTIONS
-=============================================================================#
+# --- Helper functions ---
 
 function haversine_distance(lat1, lon1, lat2, lon2)
-    """Compute distance in meters between two lat/lon points."""
     R = 6371000.0  # Earth radius in meters
     φ1, φ2 = deg2rad(lat1), deg2rad(lat2)
     Δφ = deg2rad(lat2 - lat1)
@@ -67,7 +62,6 @@ function haversine_distance(lat1, lon1, lat2, lon2)
 end
 
 function find_nearest_station(lat, lon, stations)
-    """Find the nearest station and return (name, distance_m)."""
     min_dist = Inf
     nearest = ""
     for (name, slat, slon) in stations
@@ -96,9 +90,7 @@ function parse_tt(x)
 end
 
 
-#=============================================================================
-                            LOAD DATA
-=============================================================================#
+# --- Load data ---
 
 println("\nLoading data...")
 
@@ -194,9 +186,7 @@ if n_missing_centroids > 0
 end
 println("  Loaded centroids for $(N - n_missing_centroids) of $N tracts")
 
-#=============================================================================
-                    BUILD TRAVEL TIME MATRICES
-=============================================================================#
+# --- Build travel time matrices ---
 
 println("\nBuilding travel time matrices...")
 
@@ -248,9 +238,7 @@ println("  Mean baseline travel time (finite): $(mean(finite_base)) minutes")
 println("  Mean extension travel time (finite): $(mean(finite_ext)) minutes")
 println("  Mean change: $(mean(ΔT_effective)) minutes")
 
-#=============================================================================
-                    COMPUTE TREATMENT INTENSITY (FROM GTFS TIME CHANGES)
-=============================================================================#
+# --- Treatment intensity ---
 
 println("\nComputing treatment intensity from GTFS travel-time changes...")
 
@@ -280,9 +268,7 @@ println("  Improved OD pairs (ΔT < 0): $(n_treated_pairs)")
 # κ_hat^{-ε} directly from ΔT (minutes)
 κ_hat_neg_ε = exp.(-ν .* ΔT_effective)
 
-#=============================================================================
-                    SOLVE COUNTERFACTUAL EQUILIBRIUM
-=============================================================================#
+# --- Solve counterfactual equilibrium ---
 
 println("\nSolving counterfactual equilibrium...")
 
@@ -359,9 +345,7 @@ for iter in 1:MAX_ITER
     end
 end
 
-#=============================================================================
-                    COMPUTE WELFARE CHANGE
-=============================================================================#
+# --- Welfare change ---
 
 println("\nComputing welfare change...")
 
@@ -398,9 +382,7 @@ welfare_change_pct = (Φ_hat^(1/ε) - 1) * 100
 println("  Φ_hat: $(Φ_hat)")
 println("  Welfare change: $(round(welfare_change_pct, digits=4))%")
 
-#=============================================================================
-                    SUMMARIZE RESULTS
-=============================================================================#
+# --- Summarize ---
 
 println("\n" * "="^70)
 println("RESULTS SUMMARY")
@@ -420,9 +402,7 @@ println("\nAll tracts (n = $N):")
 @printf("  Mean w_hat: %.4f\n", mean(w_hat))
 @printf("  Total welfare change: %.4f%%\n", welfare_change_pct)
 
-#=============================================================================
-                    SAVE RESULTS
-=============================================================================#
+# --- Save results ---
 
 println("\nSaving results...")
 

@@ -1,18 +1,14 @@
-# Download Cook County commercial floorspace data for Chicago
-# Gets commercial and large multifamily building data, separated into two output files
-# Note: Coordinates can be merged later from parcel universe in data_raw/
+# Download Cook County commercial floorspace data
+# Coordinates can be merged from parcel universe later
+
 source("../../setup_environment/code/packages.R")
 
-# Set longer timeout for downloads (10 minutes per request)
 options(timeout = 600)
 
-# PARAMETERS
 BASE_URL <- "https://datacatalog.cookcountyil.gov/resource/csik-bsws.csv"
-# Chicago townships by NAME (this API uses names)
 CHICAGO_TOWNSHIPS <- c("West Chicago", "South Chicago", "Jefferson", "North Chicago",
                        "Lake View", "Rogers Park", "Hyde Park", "Lake")
 
-# BUILD API URL with SoQL query
 township_filter <- paste0("township in ('", paste(CHICAGO_TOWNSHIPS, collapse = "','"), "')")
 query_params <- paste0(
   "?$limit=500000",
@@ -21,9 +17,8 @@ query_params <- paste0(
 )
 url <- paste0(BASE_URL, query_params)
 
-# DOWNLOAD
-message("Downloading commercial valuations from Cook County Open Data Portal...")
-message(sprintf("URL: %s", url))
+message("Downloading commercial valuations from Cook County")
+
 tic("Download")
 temp_file <- tempfile(fileext = ".csv")
 download.file(url, temp_file, mode = "wb", quiet = FALSE)
@@ -33,11 +28,11 @@ toc()
 
 message(sprintf("Downloaded %s rows", format(nrow(comm_data), big.mark = ",")))
 
-# DIAGNOSTICS - open sink for diagnostics file
+# Diagnostics
 sink("../output/commercial_download_diagnostics.txt")
 cat("Commercial Floorspace Download Diagnostics\n")
 cat(sprintf("Download date: %s\n", Sys.time()))
-cat(sprintf("Total rows downloaded: %s\n\n", format(nrow(comm_data), big.mark = ",")))
+cat(sprintf("Total rows: %s\n\n", format(nrow(comm_data), big.mark = ",")))
 
 cat("Township distribution:\n")
 print(table(comm_data$township, useNA = "ifany"))
@@ -51,81 +46,66 @@ cat("Category distribution:\n")
 print(table(comm_data$category, useNA = "ifany"))
 cat("\n")
 
-# CLEAN PIN: Remove dashes from keypin
-message("\nCleaning PIN format...")
+# Clean
+message("Cleaning PIN format...")
 comm_data[, pin := gsub("-", "", keypin)]
 
-# Rename columns for clarity
 setnames(comm_data, c("bldgsf", "yearbuilt", "tot_units"),
          c("building_sqft", "year_built", "total_units"))
 
-# Convert to numeric
 comm_data[, building_sqft := as.numeric(building_sqft)]
 comm_data[, year_built := as.integer(year_built)]
 comm_data[, total_units := as.integer(total_units)]
 
-# CLASSIFY PROPERTIES
-# True Commercial: Class 5xx (first character is "5")
-# Large Multifamily: Class 3xx OR category contains apartment/multifamily indicators
-message("\nClassifying properties...")
+# Classify: commercial = Class 5xx, multifamily = Class 3xx or apartment category
+message("Classifying properties...")
 
 comm_data[, class_prefix := substr(class_es, 1, 1)]
 comm_data[, is_commercial := (class_prefix == "5")]
 comm_data[, is_multifamily := (class_prefix == "3") |
             grepl("Multifamily|Apartment|Condo", category, ignore.case = TRUE)]
 
-cat(sprintf("True commercial (Class 5xx): %s rows\n",
+cat(sprintf("Commercial (Class 5xx): %s\n",
             format(sum(comm_data$is_commercial, na.rm = TRUE), big.mark = ",")))
-cat(sprintf("Large multifamily (Class 3xx or MF category): %s rows\n",
+cat(sprintf("Multifamily (Class 3xx or MF category): %s\n",
             format(sum(comm_data$is_multifamily, na.rm = TRUE), big.mark = ",")))
-cat("\n")
 
-# DEDUPLICATE: Keep largest bldgsf per PIN for each category
-message("Deduplicating: keeping largest sqft per PIN...")
+# Deduplicate
+message("Deduplicating by PIN...")
 
-# Commercial
 commercial <- comm_data[is_commercial == TRUE]
 setorder(commercial, pin, -building_sqft)
 commercial_dedup <- commercial[, .SD[1], by = pin]
 message(sprintf("Commercial: %s unique PINs", format(nrow(commercial_dedup), big.mark = ",")))
 
-# Multifamily
 multifamily <- comm_data[is_multifamily == TRUE]
 setorder(multifamily, pin, -building_sqft)
 multifamily_dedup <- multifamily[, .SD[1], by = pin]
 message(sprintf("Multifamily: %s unique PINs", format(nrow(multifamily_dedup), big.mark = ",")))
 
-cat(sprintf("Commercial unique PINs: %s\n", format(nrow(commercial_dedup), big.mark = ",")))
+cat(sprintf("\nCommercial unique PINs: %s\n", format(nrow(commercial_dedup), big.mark = ",")))
 cat(sprintf("Multifamily unique PINs: %s\n\n", format(nrow(multifamily_dedup), big.mark = ",")))
 
 if (nrow(commercial_dedup) > 0) {
-  cat("Commercial building sqft summary:\n")
+  cat("Commercial sqft summary:\n")
   print(summary(commercial_dedup$building_sqft))
   cat("\n")
 }
 
 if (nrow(multifamily_dedup) > 0) {
-  cat("Multifamily building sqft summary:\n")
+  cat("Multifamily sqft summary:\n")
   print(summary(multifamily_dedup$building_sqft))
-  cat("\n")
-
-  cat("Multifamily total units summary:\n")
+  cat("\nMultifamily units summary:\n")
   print(summary(multifamily_dedup$total_units))
-  cat("\n")
 }
 
 sink()
 
-# SAVE (PIN + floorspace data only, no coordinates)
+# Save
 commercial_output <- commercial_dedup[, .(pin, building_sqft, year_built, property_class = class_es)]
 fwrite(commercial_output, "../output/commercial_floorspace_pins.csv")
-message(sprintf("\nSaved: ../output/commercial_floorspace_pins.csv (%s rows)",
-                format(nrow(commercial_output), big.mark = ",")))
+message(sprintf("Saved: commercial_floorspace_pins.csv (%s rows)", format(nrow(commercial_output), big.mark = ",")))
 
 multifamily_output <- multifamily_dedup[, .(pin, building_sqft, year_built, total_units)]
 fwrite(multifamily_output, "../output/multifamily_floorspace_pins.csv")
-message(sprintf("Saved: ../output/multifamily_floorspace_pins.csv (%s rows)",
-                format(nrow(multifamily_output), big.mark = ",")))
-
-message("Saved: ../output/commercial_download_diagnostics.txt")
-message("\nNote: Merge with parcel universe from data_raw/ to add coordinates")
+message(sprintf("Saved: multifamily_floorspace_pins.csv (%s rows)", format(nrow(multifamily_output), big.mark = ",")))

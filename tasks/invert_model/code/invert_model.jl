@@ -1,30 +1,5 @@
-#=
-Model Inversion for Chicago Spatial Equilibrium
-================================================
-Recovers fundamentals (wages, floor prices, amenities) from observed data.
-
-Model: Simplified Monte et al. (2018)
-- Workers choose residence n and workplace i
-- Utility: V_{ni} = (b_{ni} * w_i) / (κ_{ni} * Q_n^{1-α})
-- Fréchet preference shocks with shape ε
-
-Inputs:
-- Commuting flows λ_{ni}
-- Residents by tract L_n^R
-- Workers by tract L_i^M  
-- Travel times τ_{ni}
-- Residential floor space H_n^R
-
-Parameters:
-- ν = ε*κ (from gravity): 0.078 (PPML travel-time converted)
-- ε (Fréchet shape): 6.83
-- (1-α) (housing share): 0.30
-
-Outputs:
-- Wages w_i
-- Floor prices Q_n
-- Amenities B_n
-=#
+# Model inversion for Chicago spatial equilibrium
+# Recovers wages, floor prices, amenities from observed data
 
 using CSV
 using DataFrames
@@ -32,9 +7,7 @@ using Statistics
 using LinearAlgebra
 using Printf
 
-#=============================================================================
-                            PARAMETERS
-=============================================================================#
+# ---- Parameters ----
 
 # From gravity estimation (PPML travel-time, main spec)
 # PPML travel-time: ν_time ≈ 0.039 per minute (from estimate_gravity_travel_time)
@@ -56,9 +29,7 @@ const GAMMA_LABOR = 0.65
 const TOL = 1e-8
 const MAX_ITER = 1000
 
-#=============================================================================
-                            DATA LOADING
-=============================================================================#
+# --- Data loading ---
 
 function load_data(input_dir::String)
     println("Loading data...")
@@ -86,9 +57,7 @@ function load_data(input_dir::String)
     return commuting_df, rac_df, wac_df, floor_df
 end
 
-#=============================================================================
-                            DATA PROCESSING
-=============================================================================#
+# --- Data processing ---
 
 function process_data(commuting_df, rac_df, wac_df, floor_df)
     println("\nProcessing data...")
@@ -224,15 +193,9 @@ function process_data(commuting_df, rac_df, wac_df, floor_df)
     return chicago_tracts, tract_to_idx, idx_to_tract, L_R, L_M, H_R, T, Λ, λ_obs_cond, N
 end
 
-#=============================================================================
-                        COMMUTING COST MATRIX
-=============================================================================#
+# --- Commuting cost matrix ---
 
 function compute_commuting_costs(T::Matrix{Float64}, N::Int)
-    """
-    Compute iceberg commuting cost matrix κ_{ni} = exp(κ * τ_{ni})
-    and the transformed version κ_{ni}^{-ε} used in the model.
-    """
     println("\nComputing commuting costs...")
     
     # κ_{ni}^{-ε} = exp(-ν * τ_{ni}) (direct parameterization)
@@ -250,21 +213,11 @@ function compute_commuting_costs(T::Matrix{Float64}, N::Int)
     return κ_matrix, κ_neg_ε
 end
 
-#=============================================================================
-                    STEP 1: RECOVER WAGES
-=============================================================================#
+# --- Step 1: Recover wages ---
 
 function recover_wages(L_R::Vector{Float64}, L_M::Vector{Float64},
                        κ_neg_ε::Matrix{Float64}, N::Int; w_init::Union{Nothing, Vector{Float64}} = nothing)
-    """
-    Recover wages from commuting market clearing condition:
-    
-    L_i^M = Σ_n [κ_{ni}^{-ε} * w_i^ε / W_n] * L_n^R
-    
-    where W_n = Σ_s κ_{ns}^{-ε} * w_s^ε
-    
-    This is a fixed-point problem. We iterate until convergence.
-    """
+    # Fixed-point iteration: L_i^M = Σ_n [κ_{ni}^{-ε} * w_i^ε / W_n] * L_n^R
     println("\nRecovering wages from commuting market clearing...")
     
     # Initialize wages
@@ -335,21 +288,11 @@ function recover_wages(L_R::Vector{Float64}, L_M::Vector{Float64},
     return w
 end
 
-#=============================================================================
-                    STEP 2: RECOVER FLOOR PRICES
-=============================================================================#
+# --- Step 2: Recover floor prices ---
 
-function recover_floor_prices(w::Vector{Float64}, L_R::Vector{Float64}, 
+function recover_floor_prices(w::Vector{Float64}, L_R::Vector{Float64},
                               H_R::Vector{Float64}, κ_neg_ε::Matrix{Float64}, N::Int)
-    """
-    Recover floor prices from land market clearing:
-    
-    Q_n = (1-α) * v̄_n * L_n^R / H_n^R
-    
-    where v̄_n = Σ_i λ_{ni|n} * w_i is expected income of residents at n.
-    
-    First compute W_n and then expected income.
-    """
+    # Q_n = (1-α) * v̄_n * L_n^R / H_n^R
     println("\nRecovering floor prices from land market clearing...")
     
     # Compute W_n = Σ_s κ_{ns}^{-ε} * w_s^ε
@@ -398,23 +341,11 @@ function recover_floor_prices(w::Vector{Float64}, L_R::Vector{Float64},
     return Q, v_bar, W
 end
 
-#=============================================================================
-                    STEP 3: RECOVER AMENITIES
-=============================================================================#
+# --- Step 3: Recover amenities ---
 
-function recover_amenities(L_R::Vector{Float64}, Q::Vector{Float64}, 
+function recover_amenities(L_R::Vector{Float64}, Q::Vector{Float64},
                            W::Vector{Float64}, N::Int)
-    """
-    Recover amenities from residential choice probabilities:
-    
-    λ_n^R = B_n * Q_n^{-(1-α)ε} * W_n / Φ
-    
-    Since L_n^R / L̄ = λ_n^R, we have:
-    
-    B_n ∝ (L_n^R / L̄) / [Q_n^{-(1-α)ε} * W_n]
-    
-    Amenities are identified up to scale; we normalize geometric mean = 1.
-    """
+    # B_n ∝ (L_n^R / L̄) / [Q_n^{-(1-α)ε} * W_n], normalized to geometric mean = 1
     println("\nRecovering amenities from residential choice probabilities...")
     
     L_bar = sum(L_R)
@@ -445,21 +376,10 @@ function recover_amenities(L_R::Vector{Float64}, Q::Vector{Float64},
     return B
 end
 
-#=============================================================================
-                        COMPUTE WELFARE
-=============================================================================#
+# --- Compute welfare ---
 
-function compute_welfare(B::Vector{Float64}, Q::Vector{Float64}, 
+function compute_welfare(B::Vector{Float64}, Q::Vector{Float64},
                         w::Vector{Float64}, κ_neg_ε::Matrix{Float64}, N::Int)
-    """
-    Compute welfare (expected utility):
-    
-    Φ = Σ_n Σ_i B_n * κ_{ni}^{-ε} * Q_n^{-(1-α)ε} * w_i^ε
-    
-    Welfare = γ * Φ^{1/ε}
-    
-    where γ = Γ((ε-1)/ε) is a constant.
-    """
     println("\nComputing welfare...")
     
     Q_term = Q .^ (-α_housing * ε)
@@ -482,16 +402,11 @@ function compute_welfare(B::Vector{Float64}, Q::Vector{Float64},
     return Φ, welfare
 end
 
-#=============================================================================
-                        VERIFICATION
-=============================================================================#
+# --- Verification ---
 
 function verify_equilibrium(w::Vector{Float64}, Q::Vector{Float64}, B::Vector{Float64},
                            L_R::Vector{Float64}, L_M::Vector{Float64},
                            κ_neg_ε::Matrix{Float64}, λ_obs_cond::Matrix{Float64}, N::Int)
-    """
-    Verify that the recovered fundamentals rationalize the observed equilibrium.
-    """
     println("\n" * "="^60)
     println("VERIFICATION")
     println("="^60)
@@ -562,9 +477,7 @@ function verify_equilibrium(w::Vector{Float64}, Q::Vector{Float64}, B::Vector{Fl
     return L_R_model, L_M_model, λ_model_cond, corr_lambda, mae_lambda
 end
 
-#=============================================================================
-                            MAIN
-=============================================================================#
+# --- Main ---
 
 function main()
     println("="^60)
