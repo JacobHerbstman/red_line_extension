@@ -7,24 +7,17 @@ using Printf
 
 # ---- Parameters ----
 
-# Read command line arguments
-if length(ARGS) < 2
-    error("Usage: julia run_counterfactual.jl <catchment_radius_m> <kappa_reduction_pct>")
+# This task runs a single fixed specification.
+if length(ARGS) > 0
+    println("  Ignoring command line arguments; running fixed main specification.")
 end
-
-const CATCHMENT_RADIUS = parse(Int, ARGS[1])  # retained for filename compatibility
-const SHOCK_LABEL_PCT = Int(round(parse(Float64, ARGS[2])))
-if SHOCK_LABEL_PCT != 100
-    error("This specification now applies the full GTFS shock. Pass kappa_reduction_pct = 100.")
-end
-const KAPPA_REDUCTION = 1.0
 
 println("="^70)
 println("RED LINE EXTENSION COUNTERFACTUAL")
 println("="^70)
 println("\nSpecification:")
-println("  Catchment radius: $(CATCHMENT_RADIUS) m")
-println("  GTFS shock scaling: $(Int(KAPPA_REDUCTION * 100))% (full shock)")
+println("  Fixed main specification")
+println("  GTFS shock scaling: 100% (fixed)")
 
 # Defaults are overridden by model_parameters.csv when available.
 ν = 0.039
@@ -230,7 +223,7 @@ T_baseline[.!isfinite.(T_baseline)] .= impute_tt
 T_extension[.!isfinite.(T_extension)] .= impute_tt
 
 ΔT = T_extension .- T_baseline
-ΔT_effective = ΔT .* KAPPA_REDUCTION
+ΔT_effective = ΔT
 
 finite_base = T_baseline[isfinite.(T_baseline)]
 finite_ext = T_extension[isfinite.(T_extension)]
@@ -433,14 +426,12 @@ results_df = DataFrame(
     dist_to_rle_station = tract_station_dist
 )
 
-output_file = joinpath(output_dir, "counterfactual_r$(CATCHMENT_RADIUS)_k$(SHOCK_LABEL_PCT).csv")
+output_file = joinpath(output_dir, "counterfactual.csv")
 CSV.write(output_file, results_df)
 println("  Saved: $(output_file)")
 
 # Welfare summary
 welfare_df = DataFrame(
-    catchment_radius_m = CATCHMENT_RADIUS,
-    kappa_reduction_pct = SHOCK_LABEL_PCT,
     n_treated_tracts = length(treated_tracts),
     n_treated_pairs = n_treated_pairs,
     Phi_baseline = Φ_check,
@@ -455,7 +446,7 @@ welfare_df = DataFrame(
     mean_w_hat_all = mean(w_hat)
 )
 
-welfare_file = joinpath(output_dir, "welfare_r$(CATCHMENT_RADIUS)_k$(SHOCK_LABEL_PCT).csv")
+welfare_file = joinpath(output_dir, "welfare.csv")
 CSV.write(welfare_file, welfare_df)
 println("  Saved: $(welfare_file)")
 

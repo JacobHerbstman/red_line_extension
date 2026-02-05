@@ -16,7 +16,7 @@ if (length(args) > 0) {
 } else {
   welfare_files <- list.files(
     path = "../output",
-    pattern = "^welfare_r[0-9]+_k[0-9]+\\.csv$",
+    pattern = "^welfare\\.csv$",
     full.names = TRUE
   )
 }
@@ -29,16 +29,9 @@ welfare_results <- map_dfr(welfare_files, ~ read_csv(.x, show_col_types = FALSE)
 
 cat("Loaded", nrow(welfare_results), "specifications\n")
 
-# Main spec: prefer r=800, k=100
-main_welfare <- welfare_results %>%
-  filter(catchment_radius_m == 800, kappa_reduction_pct == 100)
-if (nrow(main_welfare) == 0) {
-  main_welfare <- welfare_results %>% slice(1)
-}
-
-main_radius <- main_welfare$catchment_radius_m[[1]]
-main_kappa <- main_welfare$kappa_reduction_pct[[1]]
-main_counterfactual_file <- sprintf("../output/counterfactual_r%d_k%d.csv", main_radius, main_kappa)
+# Main spec: single fixed specification
+main_welfare <- welfare_results %>% slice(1)
+main_counterfactual_file <- "../output/counterfactual.csv"
 main_spec <- read_csv(main_counterfactual_file, show_col_types = FALSE) %>%
   mutate(tract = as.character(tract))
 
@@ -61,14 +54,13 @@ cat("Welfare Results\n")
 cat(strrep("=", 70), "\n\n")
 
 welfare_table <- welfare_results %>%
-  select(catchment_radius_m, kappa_reduction_pct, n_treated_tracts,
+  select(n_treated_tracts,
          welfare_change_pct, mean_Q_hat_treated, mean_L_R_hat_treated) %>%
   mutate(
     welfare_change_pct = round(welfare_change_pct, 4),
     mean_Q_hat_treated = round(mean_Q_hat_treated, 4),
     mean_L_R_hat_treated = round(mean_L_R_hat_treated, 4)
-  ) %>%
-  arrange(catchment_radius_m, kappa_reduction_pct)
+  )
 
 print(welfare_table)
 
@@ -77,7 +69,7 @@ cat("\nSaved: welfare_summary.csv\n")
 
 # --- Main spec summary ---
 cat("\n", strrep("=", 70), "\n")
-cat(sprintf("Main Specification (%dm, %.0f%% shock)\n", main_radius, main_kappa))
+cat("Main Specification\n")
 cat(strrep("=", 70), "\n\n")
 
 cat(sprintf("Treated tracts: %d\n", main_welfare$n_treated_tracts))
@@ -115,8 +107,8 @@ cat("\nSaved: counterfactual_main_spec.csv\n")
 # Robustness table
 robustness_table <- welfare_results %>%
   mutate(
-    spec_label = sprintf("r=%dm, %d%%", catchment_radius_m, kappa_reduction_pct),
-    main_spec = (catchment_radius_m == main_radius & kappa_reduction_pct == main_kappa)
+    spec_label = if_else(row_number() == 1, "Main spec", paste0("Spec ", row_number())),
+    main_spec = (row_number() == 1)
   ) %>%
   select(spec_label, main_spec, n_treated_tracts, welfare_change_pct,
          mean_Q_hat_treated, mean_L_R_hat_treated) %>%
@@ -160,8 +152,7 @@ p_price <- ggplot() +
     name = "% Change", na.value = "gray90", oob = scales::squish
   ) +
   geom_point(data = rle_stations, aes(x = lon, y = lat), color = "black", size = 2, shape = 17) +
-  labs(title = "Floor Price Changes",
-       subtitle = sprintf("%dm catchment, %.0f%% shock", main_radius, main_kappa)) +
+  labs(title = "Floor Price Changes") +
   map_theme
 
 ggsave("../output/map_price_change.pdf", p_price, width = 8, height = 10)
@@ -175,8 +166,7 @@ p_pop <- ggplot() +
     name = "% Change", na.value = "gray90", oob = scales::squish
   ) +
   geom_point(data = rle_stations, aes(x = lon, y = lat), color = "black", size = 2, shape = 17) +
-  labs(title = "Population Changes",
-       subtitle = sprintf("%dm catchment, %.0f%% shock", main_radius, main_kappa)) +
+  labs(title = "Population Changes") +
   map_theme
 
 ggsave("../output/map_population_change.pdf", p_pop, width = 8, height = 10)
@@ -282,30 +272,22 @@ cat("\nCreating robustness plot...\n")
 
 robust_plot_data <- welfare_results %>%
   mutate(
-    catchment_label = factor(sprintf("%dm", catchment_radius_m)),
-    reduction_label = factor(sprintf("%d%%", kappa_reduction_pct)),
-    main_spec = (catchment_radius_m == main_radius & kappa_reduction_pct == main_kappa)
+    spec_label = factor(if_else(row_number() == 1, "Main spec", paste0("Spec ", row_number()))),
+    main_spec = (row_number() == 1)
   )
 
 p_robust <- ggplot(robust_plot_data,
-                   aes(x = reduction_label, y = welfare_change_pct,
-                       color = catchment_label, group = catchment_label))
-
-if (nrow(robust_plot_data) > 1) {
-  p_robust <- p_robust + geom_line(linewidth = 1)
-}
+                   aes(x = spec_label, y = welfare_change_pct, color = main_spec))
 
 p_robust <- p_robust +
-  geom_point(aes(shape = main_spec), size = 3) +
-  scale_shape_manual(values = c("FALSE" = 16, "TRUE" = 18), guide = "none") +
-  scale_color_brewer(palette = "Set1", name = "Catchment") +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("TRUE" = "firebrick", "FALSE" = "gray40"), guide = "none") +
   labs(
-    title = "Welfare Effects Across Specifications",
-    subtitle = sprintf("Diamond = main spec (%dm, %.0f%%)", main_radius, main_kappa),
-    x = "Shock Scale", y = "Welfare (%)"
+    title = "Welfare Effect",
+    x = "", y = "Welfare (%)"
   ) +
   theme_minimal() +
-  theme(legend.position = "right",
+  theme(legend.position = "none",
         plot.title = element_text(hjust = 0.5, face = "bold"),
         plot.subtitle = element_text(hjust = 0.5))
 
@@ -318,15 +300,8 @@ cat("Summary\n")
 cat(strrep("=", 70), "\n\n")
 
 cat("Welfare change range:\n")
-cat(sprintf("  Min:  %.4f%% (r=%dm, k=%d%%)\n",
-            min(welfare_results$welfare_change_pct),
-            welfare_results$catchment_radius_m[which.min(welfare_results$welfare_change_pct)],
-            welfare_results$kappa_reduction_pct[which.min(welfare_results$welfare_change_pct)]))
-cat(sprintf("  Max:  %.4f%% (r=%dm, k=%d%%)\n",
-            max(welfare_results$welfare_change_pct),
-            welfare_results$catchment_radius_m[which.max(welfare_results$welfare_change_pct)],
-            welfare_results$kappa_reduction_pct[which.max(welfare_results$welfare_change_pct)]))
-cat(sprintf("  Main: %.4f%% (r=%dm, k=%d%%)\n",
-            main_welfare$welfare_change_pct, main_radius, main_kappa))
+cat(sprintf("  Min:  %.4f%%\n", min(welfare_results$welfare_change_pct)))
+cat(sprintf("  Max:  %.4f%%\n", max(welfare_results$welfare_change_pct)))
+cat(sprintf("  Main: %.4f%%\n", main_welfare$welfare_change_pct))
 
 cat("\nDone\n")
